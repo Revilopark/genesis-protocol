@@ -112,7 +112,7 @@ class EpisodeGeneratorJob:
                     RETURN h {
                         .id, .hero_name, .power_type, .origin_story,
                         .current_location, .episode_count,
-                        .content_settings, .character_sheet
+                        .violence_level, .language_filter, .character_sheet
                     } as hero
                     ORDER BY h.last_episode_date ASC
                     """
@@ -133,7 +133,7 @@ class EpisodeGeneratorJob:
                     RETURN h {
                         .id, .hero_name, .power_type, .origin_story,
                         .current_location, .episode_count,
-                        .content_settings, .character_sheet
+                        .violence_level, .language_filter, .character_sheet
                     } as hero
                     """,
                     hero_id=hero_id,
@@ -208,6 +208,12 @@ class EpisodeGeneratorJob:
 
         logger.info(f"Generating episode {episode_number} for {hero_name} ({hero_id})")
 
+        # Build content_settings from individual fields
+        content_settings = {
+            "violence_level": hero.get("violence_level", 1),
+            "language_filter": hero.get("language_filter", True),
+        }
+
         # Get context for generation
         previous_summary = await self._get_previous_episodes_summary(hero_id)
         canon_events = await self._get_canon_events()
@@ -221,7 +227,7 @@ class EpisodeGeneratorJob:
             "episode_number": episode_number,
             "previous_episodes_summary": previous_summary,
             "active_canon_events": canon_events,
-            "content_settings": hero.get("content_settings", {}),
+            "content_settings": content_settings,
             "include_crossover": False,
             "crossover_hero": None,
         }
@@ -239,7 +245,7 @@ class EpisodeGeneratorJob:
             "character_sheet": hero.get("character_sheet"),
             "panels": script.get("panels", []),
             "style_preset": "comic_book",
-            "content_settings": hero.get("content_settings", {}),
+            "content_settings": content_settings,
         }
 
         art_result = await self.art_department.process(art_input)
@@ -265,7 +271,7 @@ class EpisodeGeneratorJob:
                 for p in script.get("panels", [])
             ],
             "script": script,
-            "content_settings": hero.get("content_settings", {}),
+            "content_settings": content_settings,
             "include_generative_highlight": True,
             "climax_panel_numbers": climax_panels,
         }

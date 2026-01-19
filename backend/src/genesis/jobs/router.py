@@ -234,7 +234,8 @@ async def seed_test_data(
                         h.episode_count = 0,
                         h.significance_score = 0,
                         h.created_at = datetime(),
-                        h.content_settings = {violence_level: 1, language_filter: true}
+                        h.violence_level = 1,
+                        h.language_filter = true
                     WITH h
                     MATCH (g:Guardian {id: 'guardian-test-001'})
                     MERGE (h)-[:SPONSORED_BY]->(g)
