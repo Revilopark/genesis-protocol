@@ -1,5 +1,6 @@
 """Neo4j database connection management."""
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -7,20 +8,32 @@ from neo4j import AsyncDriver, AsyncGraphDatabase, AsyncSession
 
 from genesis.config import settings
 
+logger = logging.getLogger(__name__)
+
 _driver: AsyncDriver | None = None
+_connection_available: bool = False
 
 
 async def init_neo4j() -> None:
     """Initialize Neo4j connection pool."""
-    global _driver
-    _driver = AsyncGraphDatabase.driver(
-        settings.neo4j_uri,
-        auth=(settings.neo4j_user, settings.neo4j_password),
-        max_connection_pool_size=settings.neo4j_max_connection_pool_size,
-    )
-    # Verify connectivity
-    async with _driver.session(database=settings.neo4j_database) as session:
-        await session.run("RETURN 1")
+    global _driver, _connection_available
+    try:
+        _driver = AsyncGraphDatabase.driver(
+            settings.neo4j_uri,
+            auth=(settings.neo4j_user, settings.neo4j_password),
+            max_connection_pool_size=settings.neo4j_max_connection_pool_size,
+        )
+        # Verify connectivity
+        async with _driver.session(database=settings.neo4j_database) as session:
+            await session.run("RETURN 1")
+        _connection_available = True
+        logger.info("Neo4j connection established successfully")
+    except Exception as e:
+        logger.warning(f"Failed to connect to Neo4j: {e}. Some features will be unavailable.")
+        _connection_available = False
+        if _driver:
+            await _driver.close()
+            _driver = None
 
 
 async def close_neo4j() -> None:
