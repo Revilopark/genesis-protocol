@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: genesis-production
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: genesis
+  source:
+    repoURL: https://github.com/your-org/genesis-protocol
+    targetRevision: main
+    path: infra/kubernetes/overlays/production
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: genesis-production
+  syncPolicy:
+    # Manual sync for production - no automated deployment
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

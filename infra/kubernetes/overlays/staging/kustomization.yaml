@@ -1,0 +1,48 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: genesis-staging
+
+resources:
+  - ../../base/namespace.yaml
+  - ../../base/genesis-api
+  - ../../base/genesis-frontend
+  - ../../base/genesis-agents
+  - ../../base/ingress
+
+images:
+  - name: genesis-api
+    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/genesis-api
+    newTag: latest
+  - name: genesis-frontend
+    newName: ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/genesis-frontend
+    newTag: latest
+
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+    target:
+      kind: Deployment
+      name: genesis-api
+  - patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+    target:
+      kind: Deployment
+      name: genesis-frontend
+
+configMapGenerator:
+  - name: genesis-api-config
+    behavior: merge
+    literals:
+      - ENVIRONMENT=staging
+      - DEBUG=true
+      - CORS_ORIGINS=["https://staging.genesis-protocol.com"]
+
+  - name: genesis-frontend-config
+    behavior: merge
+    literals:
+      - NEXT_PUBLIC_API_URL=https://api-staging.genesis-protocol.com

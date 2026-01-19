@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: genesis
+  namespace: argocd
+spec:
+  description: The Genesis Protocol project
+  sourceRepos:
+    - "https://github.com/your-org/genesis-protocol"
+  destinations:
+    - namespace: genesis-staging
+      server: https://kubernetes.default.svc
+    - namespace: genesis-production
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: "*"
+    - group: apps
+      kind: "*"
+    - group: autoscaling
+      kind: "*"
+    - group: batch
+      kind: "*"
+    - group: networking.k8s.io
+      kind: "*"
