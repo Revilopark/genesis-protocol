@@ -9,8 +9,8 @@ ENV UV_LINK_MODE=copy
 
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy dependency and project files
+COPY pyproject.toml uv.lock README.md ./
 
 # Install dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
