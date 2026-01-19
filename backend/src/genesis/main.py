@@ -7,9 +7,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from genesis.config import settings
-from genesis.core.database import close_neo4j, init_neo4j
+from genesis.core.database import close_neo4j, init_neo4j, _connection_available as neo4j_available
 from genesis.core.middleware import RequestLoggingMiddleware
-from genesis.core.redis import close_redis, init_redis
+from genesis.core.redis import close_redis, init_redis, _redis_available as redis_available
 
 # Import routers
 from genesis.auth.router import router as auth_router
@@ -25,8 +25,10 @@ from genesis.social.router import router as social_router
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifecycle manager."""
     # Startup
+    print("Starting database connections...", flush=True)
     await init_neo4j()
     await init_redis()
+    print(f"Database connections initialized. Neo4j: {neo4j_available}, Redis: {redis_available}", flush=True)
     yield
     # Shutdown
     await close_neo4j()
@@ -73,6 +75,17 @@ def create_app() -> FastAPI:
     async def readiness_check() -> dict[str, str]:
         # Could add database connectivity checks here
         return {"status": "ready"}
+
+    # Debug endpoint for connection status
+    @app.get("/debug/connections")
+    async def connection_status() -> dict[str, bool | str]:
+        from genesis.core.database import _connection_available as neo4j_conn
+        from genesis.core.redis import _redis_available as redis_conn
+        return {
+            "neo4j_connected": neo4j_conn,
+            "redis_connected": redis_conn,
+            "neo4j_uri": settings.neo4j_uri[:30] + "..." if len(settings.neo4j_uri) > 30 else settings.neo4j_uri,
+        }
 
     return app
 
