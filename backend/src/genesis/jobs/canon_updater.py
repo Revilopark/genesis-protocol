@@ -7,11 +7,12 @@ This job runs nightly to:
 4. Update NPC awareness with new world state
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
 
 from genesis.config import settings
 from genesis.core.database import get_session
@@ -24,20 +25,16 @@ SIGNIFICANCE_THRESHOLD = 50.0
 class CanonUpdaterJob:
     """Job to update the Canon Layer with emergent world events."""
 
-    _initialized: bool = False
-
     def __init__(self) -> None:
         """Initialize the job."""
-        self._model: genai.GenerativeModel | None = None
+        self._client: genai.Client | None = None
 
     def _ensure_initialized(self) -> None:
         """Initialize Google AI Studio if not already done."""
-        if not CanonUpdaterJob._initialized and settings.gemini_api_key:
+        if self._client is None and settings.gemini_api_key:
             try:
-                genai.configure(api_key=settings.gemini_api_key)
-                CanonUpdaterJob._initialized = True
-                self._model = genai.GenerativeModel("gemini-2.5-pro")
-                logger.info("Google AI Studio initialized for Canon Updater")
+                self._client = genai.Client(api_key=settings.gemini_api_key)
+                logger.info("Google AI Studio client initialized for Canon Updater")
             except Exception as e:
                 logger.warning(f"Failed to initialize Google AI Studio: {e}")
 
@@ -245,7 +242,7 @@ class CanonUpdaterJob:
 
     async def _generate_event_description(self, event: dict[str, Any]) -> str:
         """Generate a canon event description using AI."""
-        if self._model is None:
+        if self._client is None:
             return f"A significant event occurred: {event['value']}"
 
         try:
@@ -263,7 +260,11 @@ class CanonUpdaterJob:
             - Be written in present tense
             """
 
-            response = await self._model.generate_content_async(prompt)
+            response = await asyncio.to_thread(
+                self._client.models.generate_content,
+                model="gemini-3-pro-preview",
+                contents=prompt,
+            )
             return response.text.strip()
         except Exception as e:
             logger.warning(f"Failed to generate event description: {e}")
@@ -277,7 +278,7 @@ class CanonUpdaterJob:
         if not promoted_events:
             return "The world remains unchanged today."
 
-        if self._model is None:
+        if self._client is None:
             event_titles = [e["title"] for e in promoted_events]
             return f"Today's events: {', '.join(event_titles)}"
 
@@ -297,7 +298,11 @@ class CanonUpdaterJob:
             Write in present tense, as if reporting current events in a living world.
             """
 
-            response = await self._model.generate_content_async(prompt)
+            response = await asyncio.to_thread(
+                self._client.models.generate_content,
+                model="gemini-3-pro-preview",
+                contents=prompt,
+            )
             return response.text.strip()
         except Exception as e:
             logger.warning(f"Failed to generate world summary: {e}")

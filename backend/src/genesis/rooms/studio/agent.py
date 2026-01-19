@@ -6,7 +6,8 @@ import time
 import uuid
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from google.cloud import storage
 
 from genesis.config import settings
@@ -30,31 +31,20 @@ TARGET_TOTAL_DURATION = 60.0  # 60-second episode videos
 class StudioAgent(BaseRoom):
     """Studio agent for video synthesis using Veo 3.1 fast and parallax techniques."""
 
-    _initialized: bool = False
-
     def __init__(self) -> None:
         """Initialize the agent."""
-        self._veo_model: Any = None
+        self._client: genai.Client | None = None
         self._storage_client: storage.Client | None = None
         self._bucket_name = f"{settings.gcp_project_id}-genesis-assets"
 
     def _ensure_initialized(self) -> None:
         """Initialize Google AI Studio and storage if not already done."""
-        if not StudioAgent._initialized and settings.gemini_api_key:
+        if self._client is None and settings.gemini_api_key:
             try:
-                genai.configure(api_key=settings.gemini_api_key)
-                StudioAgent._initialized = True
-                logger.info("Google AI Studio initialized for Studio")
+                self._client = genai.Client(api_key=settings.gemini_api_key)
+                logger.info("Google AI Studio client initialized for Studio")
             except Exception as e:
                 logger.warning(f"Failed to initialize Google AI Studio: {e}")
-
-        if self._veo_model is None and StudioAgent._initialized:
-            try:
-                # Use Veo 3.1 fast for video generation
-                self._veo_model = genai.GenerativeModel("veo-3.1-fast-generate-preview")
-                logger.info("Veo 3.1 fast model loaded")
-            except Exception as e:
-                logger.warning(f"Failed to load Veo 3.1 fast model: {e}")
 
         if self._storage_client is None and settings.gcp_project_id:
             try:
@@ -325,43 +315,88 @@ class StudioAgent(BaseRoom):
         episode_number: int,
         panel_number: int,
     ) -> str:
-        """Call Veo 3.1 fast API for video generation."""
+        """Call Veo 3.1 fast API for video generation.
+
+        Veo uses generate_videos() which returns a long-running operation
+        that must be polled until completion.
+        """
+        import os
+        import tempfile
+
         unique_id = uuid.uuid4().hex[:8]
         video_path = f"heroes/{hero_id}/episodes/{episode_number}/veo_panel_{panel_number}_{unique_id}.mp4"
 
-        if self._veo_model is None:
-            logger.warning("Veo model not initialized, returning placeholder")
+        if self._client is None:
+            logger.warning("Gemini client not initialized, returning placeholder")
             return f"gs://{self._bucket_name}/{video_path}"
 
         try:
-            # Generate video using Veo 3.1 fast
-            response = await self._veo_model.generate_content_async(
-                contents=[prompt],
-                generation_config={
-                    "response_modalities": ["VIDEO"],
-                    "video_config": {
-                        "duration_seconds": int(GENERATIVE_DURATION_PER_PANEL),
-                        "aspect_ratio": "16:9",
-                    },
-                },
+            logger.info(f"Starting Veo video generation for panel {panel_number}")
+
+            # Configure video generation settings
+            config = types.GenerateVideosConfig(
+                aspect_ratio="16:9",
             )
 
-            # Check if video was generated
-            if response.candidates and len(response.candidates) > 0:
-                candidate = response.candidates[0]
-                if hasattr(candidate, "content") and candidate.content.parts:
-                    for part in candidate.content.parts:
-                        if hasattr(part, "video_metadata"):
-                            # Upload video to GCS
-                            video_data = part.inline_data.data if hasattr(part, "inline_data") else None
-                            if video_data:
-                                uploaded_url = await self._upload_video_to_gcs(
-                                    video_data=video_data,
-                                    hero_id=hero_id,
-                                    episode_number=episode_number,
-                                    panel_number=panel_number,
-                                )
-                                return uploaded_url
+            # Veo uses generate_videos() - returns a long-running operation
+            operation = await asyncio.to_thread(
+                self._client.models.generate_videos,
+                model="veo-3.1-fast-generate-preview",
+                prompt=prompt,
+                config=config,
+            )
+
+            # Poll until video generation completes (max 5 minutes)
+            max_polls = 30
+            poll_count = 0
+            while not operation.done and poll_count < max_polls:
+                logger.info(f"Waiting for Veo video generation (panel {panel_number})... poll {poll_count + 1}")
+                await asyncio.sleep(10)  # Wait 10 seconds between polls
+                operation = await asyncio.to_thread(
+                    self._client.operations.get,
+                    operation,
+                )
+                poll_count += 1
+
+            if not operation.done:
+                logger.warning(f"Veo video generation timed out for panel {panel_number}")
+                return f"gs://{self._bucket_name}/{video_path}"
+
+            # Get the generated video
+            if operation.response and operation.response.generated_videos:
+                generated_video = operation.response.generated_videos[0]
+
+                # Download the video using the SDK's download method
+                await asyncio.to_thread(
+                    self._client.files.download,
+                    file=generated_video.video,
+                )
+
+                # Save to temp file, then upload to GCS
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as tmp:
+                    tmp_path = tmp.name
+
+                # Use the SDK's save method to write the video
+                await asyncio.to_thread(
+                    generated_video.video.save,
+                    tmp_path,
+                )
+
+                # Read video data and upload to GCS
+                with open(tmp_path, 'rb') as f:
+                    video_data = f.read()
+
+                # Clean up temp file
+                os.unlink(tmp_path)
+
+                uploaded_url = await self._upload_video_to_gcs(
+                    video_data=video_data,
+                    hero_id=hero_id,
+                    episode_number=episode_number,
+                    panel_number=panel_number,
+                )
+                logger.info(f"Veo video generated and uploaded for panel {panel_number}")
+                return uploaded_url
 
             logger.warning(f"No video generated for panel {panel_number}")
             return f"gs://{self._bucket_name}/{video_path}"
@@ -391,9 +426,9 @@ class StudioAgent(BaseRoom):
 
             blob = bucket.blob(blob_path)
             blob.upload_from_string(video_data, content_type="video/mp4")
-            blob.make_public()
 
-            return blob.public_url
+            # Return GCS URI - bucket has uniform access
+            return f"https://storage.googleapis.com/{self._bucket_name}/{blob_path}"
 
         except Exception as e:
             logger.error(f"Failed to upload video to GCS: {e}")

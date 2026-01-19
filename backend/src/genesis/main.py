@@ -87,6 +87,9 @@ def create_app() -> FastAPI:
             "neo4j_connected": neo4j_conn,
             "redis_connected": redis_conn,
             "neo4j_uri": settings.neo4j_uri[:30] + "..." if len(settings.neo4j_uri) > 30 else settings.neo4j_uri,
+            "gemini_api_key_set": bool(settings.gemini_api_key),
+            "gemini_api_key_prefix": settings.gemini_api_key[:10] + "..." if settings.gemini_api_key else "NOT SET",
+            "gcp_project_id": settings.gcp_project_id or "NOT SET",
         }
 
     return app

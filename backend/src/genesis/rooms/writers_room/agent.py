@@ -4,7 +4,8 @@ import json
 import logging
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from genesis.config import settings
 from genesis.rooms.base import BaseRoom
@@ -23,30 +24,28 @@ logger = logging.getLogger(__name__)
 
 
 class WritersRoomAgent(BaseRoom):
-    """Writers Room agent for narrative generation using Gemini 2.5 Pro."""
-
-    _initialized: bool = False
+    """Writers Room agent for narrative generation using Gemini 3 Pro."""
 
     def __init__(self) -> None:
         """Initialize the agent."""
-        self.model_name = "gemini-2.5-pro"
-        self._model: genai.GenerativeModel | None = None
+        self.model_name = "gemini-3-pro-preview"
+        self._client: genai.Client | None = None
 
     def _ensure_initialized(self) -> None:
         """Initialize Google AI Studio if not already done."""
-        if not WritersRoomAgent._initialized and settings.gemini_api_key:
-            try:
-                genai.configure(api_key=settings.gemini_api_key)
-                WritersRoomAgent._initialized = True
-                logger.info("Google AI Studio initialized for Writers Room")
-            except Exception as e:
-                logger.warning(f"Failed to initialize Google AI Studio: {e}")
+        if self._client is not None:
+            return  # Already initialized
 
-        if self._model is None and WritersRoomAgent._initialized:
-            self._model = genai.GenerativeModel(
-                self.model_name,
-                system_instruction=SYSTEM_PROMPT,
-            )
+        if not settings.gemini_api_key:
+            logger.warning(f"GEMINI_API_KEY not configured (empty/not set)")
+            return
+
+        try:
+            logger.info(f"Initializing Google AI Studio client with key prefix: {settings.gemini_api_key[:10]}...")
+            self._client = genai.Client(api_key=settings.gemini_api_key)
+            logger.info("Google AI Studio client initialized for Writers Room")
+        except Exception as e:
+            logger.error(f"Failed to initialize Google AI Studio: {e}")
 
     async def process(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Generate episode script from input."""
@@ -106,34 +105,15 @@ class WritersRoomAgent(BaseRoom):
 
         return prompt
 
-    def _get_generation_config(self, input_data: WritersRoomInput) -> dict[str, Any]:
+    def _get_generation_config(self, input_data: WritersRoomInput) -> types.GenerateContentConfig:
         """Get generation config based on content settings."""
-        return {
-            "temperature": 0.9,
-            "top_p": 0.95,
-            "top_k": 40,
-            "max_output_tokens": 8192,
-            "response_mime_type": "application/json",
-        }
-
-    def _get_safety_settings(self, input_data: WritersRoomInput) -> list[dict[str, str]]:
-        """Get safety settings based on content settings."""
-        violence_level = input_data.content_settings.get("violence_level", 1)
-
-        # Adjust safety thresholds based on violence level
-        if violence_level == 1:  # Mild
-            harm_threshold = "BLOCK_LOW_AND_ABOVE"
-        elif violence_level == 2:  # Moderate
-            harm_threshold = "BLOCK_MEDIUM_AND_ABOVE"
-        else:  # Action-Heavy
-            harm_threshold = "BLOCK_ONLY_HIGH"
-
-        return [
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_LOW_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_LOW_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_LOW_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_LOW_AND_ABOVE"},
-        ]
+        return types.GenerateContentConfig(
+            temperature=0.9,
+            top_p=0.95,
+            top_k=40,
+            max_output_tokens=8192,
+            response_mime_type="application/json",
+        )
 
     async def _generate_script(
         self,
@@ -144,13 +124,12 @@ class WritersRoomAgent(BaseRoom):
         self._ensure_initialized()
 
         # If Google AI Studio not initialized, return fallback
-        if self._model is None:
+        if self._client is None:
             logger.warning("Google AI Studio not initialized, returning fallback script")
             return self._generate_fallback_script(input_data)
 
         try:
             generation_config = self._get_generation_config(input_data)
-            safety_settings = self._get_safety_settings(input_data)
 
             # Add JSON schema instruction to prompt
             json_instruction = """
@@ -173,12 +152,14 @@ Output your response as a valid JSON object with this exact structure:
 
 Generate exactly 8-10 panels for this episode.
 """
-            full_prompt = prompt + "\n\n" + json_instruction
+            full_prompt = f"{SYSTEM_PROMPT}\n\n{prompt}\n\n{json_instruction}"
 
-            response = await self._model.generate_content_async(
-                full_prompt,
-                generation_config=generation_config,
-                safety_settings=safety_settings,
+            import asyncio
+            response = await asyncio.to_thread(
+                self._client.models.generate_content,
+                model=self.model_name,
+                contents=full_prompt,
+                config=generation_config,
             )
 
             # Parse the response

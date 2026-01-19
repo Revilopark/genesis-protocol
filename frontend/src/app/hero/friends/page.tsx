@@ -1,23 +1,74 @@
 "use client";
 
-import { useState } from "react";
-
-// Mock friends data
-const friendsData = [
-  { id: 1, heroName: "Blaze Runner", powerType: "Fire Manipulation", lastActive: "Online now", status: "online", hasNewEpisode: true },
-  { id: 2, heroName: "Shadow Strike", powerType: "Darkness Control", lastActive: "2 hours ago", status: "offline", hasNewEpisode: true },
-  { id: 3, heroName: "Crystal Guardian", powerType: "Earth/Crystal", lastActive: "5 min ago", status: "online", hasNewEpisode: false },
-  { id: 4, heroName: "Tempest", powerType: "Weather Control", lastActive: "1 day ago", status: "offline", hasNewEpisode: false },
-  { id: 5, heroName: "Cyber Pulse", powerType: "Technopathy", lastActive: "Online now", status: "online", hasNewEpisode: true },
-];
-
-const pendingRequests = [
-  { id: 101, heroName: "Phantom Wave", powerType: "Sound Manipulation", mutualFriends: 3 },
-  { id: 102, heroName: "Iron Will", powerType: "Super Strength", mutualFriends: 1 },
-];
+import { useState, useEffect } from "react";
+import { api, Friend, FriendRequest } from "@/lib/api";
 
 export default function FriendsPage() {
   const [activeTab, setActiveTab] = useState<"friends" | "requests" | "add">("friends");
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<FriendRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [friendsData, requestsData] = await Promise.all([
+        api.getFriends(),
+        api.getPendingRequests(),
+      ]);
+      setFriends(friendsData);
+      setPendingRequests(requestsData);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAcceptRequest = async (connectionId: string) => {
+    setActionLoading(connectionId);
+    try {
+      await api.acceptFriendRequest(connectionId);
+      await loadData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to accept request");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeclineRequest = async (connectionId: string) => {
+    setActionLoading(connectionId);
+    try {
+      await api.declineFriendRequest(connectionId);
+      await loadData();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to decline request");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="flex flex-col items-center gap-4">
+          <svg className="w-8 h-8 animate-spin text-primary" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <p className="text-muted-foreground">Loading hero network...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -26,6 +77,12 @@ export default function FriendsPage() {
         <h1 className="text-2xl font-bold">Hero Network</h1>
         <p className="text-muted-foreground">Connect with other heroes for crossover episodes</p>
       </div>
+
+      {error && (
+        <div className="bg-destructive/10 text-destructive px-4 py-3 rounded-lg">
+          {error}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2">
@@ -37,7 +94,7 @@ export default function FriendsPage() {
               : "bg-secondary text-secondary-foreground"
           }`}
         >
-          Friends ({friendsData.length})
+          Friends ({friends.length})
         </button>
         <button
           onClick={() => setActiveTab("requests")}
@@ -70,33 +127,30 @@ export default function FriendsPage() {
       {activeTab === "friends" && (
         <div className="space-y-3">
           {/* Online Friends First */}
-          {friendsData
-            .sort((a, b) => (a.status === "online" ? -1 : 1))
+          {friends
+            .sort((a, b) => (a.is_online ? -1 : 1) - (b.is_online ? -1 : 1))
             .map((friend) => (
               <div
-                key={friend.id}
+                key={friend.hero_id}
                 className="flex items-center gap-4 p-4 bg-card rounded-xl border hover:border-primary/50 transition-colors"
               >
                 {/* Avatar with status */}
                 <div className="relative">
                   <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
-                    <span className="font-bold text-primary">{friend.heroName.charAt(0)}</span>
+                    <span className="font-bold text-primary">{friend.hero_name.charAt(0)}</span>
                   </div>
                   <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-2 border-card ${
-                    friend.status === "online" ? "bg-green-500" : "bg-muted"
+                    friend.is_online ? "bg-green-500" : "bg-muted"
                   }`} />
                 </div>
 
                 {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium truncate">{friend.heroName}</p>
-                    {friend.hasNewEpisode && (
-                      <span className="px-2 py-0.5 bg-primary/20 rounded text-xs text-primary">New Episode</span>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground truncate">{friend.powerType}</p>
-                  <p className="text-xs text-muted-foreground">{friend.lastActive}</p>
+                  <p className="font-medium truncate">{friend.hero_name}</p>
+                  <p className="text-sm text-muted-foreground truncate">{friend.power_type}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {friend.is_online ? "Online now" : "Offline"}
+                  </p>
                 </div>
 
                 {/* Actions */}
@@ -115,7 +169,7 @@ export default function FriendsPage() {
               </div>
             ))}
 
-          {friendsData.length === 0 && (
+          {friends.length === 0 && (
             <div className="text-center py-12">
               <div className="w-16 h-16 mx-auto bg-muted rounded-full flex items-center justify-center mb-4">
                 <svg className="w-8 h-8 text-muted-foreground" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -143,19 +197,28 @@ export default function FriendsPage() {
                 >
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center">
-                      <span className="font-bold text-primary">{request.heroName.charAt(0)}</span>
+                      <span className="font-bold text-primary">{request.hero_name.charAt(0)}</span>
                     </div>
                     <div className="flex-1">
-                      <p className="font-medium">{request.heroName}</p>
-                      <p className="text-sm text-muted-foreground">{request.powerType}</p>
-                      <p className="text-xs text-muted-foreground">{request.mutualFriends} mutual friends</p>
+                      <p className="font-medium">{request.hero_name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Requested {new Date(request.initiated_at).toLocaleDateString()}
+                      </p>
                     </div>
                   </div>
                   <div className="flex gap-2 mt-4">
-                    <button className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors">
-                      Accept
+                    <button
+                      onClick={() => handleAcceptRequest(request.id)}
+                      disabled={actionLoading === request.id}
+                      className="flex-1 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+                    >
+                      {actionLoading === request.id ? "..." : "Accept"}
                     </button>
-                    <button className="flex-1 py-2 bg-secondary text-secondary-foreground rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors">
+                    <button
+                      onClick={() => handleDeclineRequest(request.id)}
+                      disabled={actionLoading === request.id}
+                      className="flex-1 py-2 bg-secondary text-secondary-foreground rounded-lg text-sm font-medium hover:bg-secondary/80 transition-colors disabled:opacity-50"
+                    >
                       Decline
                     </button>
                   </div>
@@ -207,32 +270,9 @@ export default function FriendsPage() {
             </button>
           </div>
 
-          {/* School Friends */}
-          <div className="space-y-4">
-            <h3 className="font-semibold">Heroes at Your School</h3>
-            <p className="text-sm text-muted-foreground">
-              These heroes go to your school. Connect with them for epic crossovers!
-            </p>
-            <div className="space-y-2">
-              {[
-                { name: "Thunder Fist", power: "Lightning", grade: "8th" },
-                { name: "Mirage", power: "Illusions", grade: "7th" },
-                { name: "Quantum", power: "Probability", grade: "8th" },
-              ].map((hero, i) => (
-                <div key={i} className="flex items-center gap-4 p-3 bg-secondary/50 rounded-lg">
-                  <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                    <span className="font-medium text-primary">{hero.name.charAt(0)}</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium text-sm">{hero.name}</p>
-                    <p className="text-xs text-muted-foreground">{hero.power} • {hero.grade} grade</p>
-                  </div>
-                  <button className="px-3 py-1.5 bg-primary text-white rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors">
-                    Add
-                  </button>
-                </div>
-              ))}
-            </div>
+          {/* Coming Soon Notice */}
+          <div className="text-center py-6 text-muted-foreground">
+            <p className="text-sm">More ways to connect with heroes coming soon!</p>
           </div>
         </div>
       )}

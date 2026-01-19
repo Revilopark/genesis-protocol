@@ -1,4 +1,4 @@
-"""Art Department agent implementation using Imagen 4."""
+"""Art Department agent implementation using Gemini 3 Pro Image."""
 
 import asyncio
 import logging
@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
 from google.cloud import storage
 
 from genesis.config import settings
@@ -37,40 +37,36 @@ NEGATIVE_PROMPT = (
 
 
 class ArtDepartmentAgent(BaseRoom):
-    """Art Department agent for image generation using Imagen 4."""
-
-    _initialized: bool = False
+    """Art Department agent for image generation using Gemini 3 Pro Image."""
 
     def __init__(self) -> None:
         """Initialize the agent."""
-        self._imagen_model: genai.ImageGenerationModel | None = None
+        self._client: genai.Client | None = None
         self._storage_client: storage.Client | None = None
         self._bucket_name = f"{settings.gcp_project_id}-genesis-assets"
 
     def _ensure_initialized(self) -> None:
-        """Initialize Google AI Studio and storage if not already done."""
-        if not ArtDepartmentAgent._initialized and settings.gemini_api_key:
-            try:
-                genai.configure(api_key=settings.gemini_api_key)
-                ArtDepartmentAgent._initialized = True
-                logger.info("Google AI Studio initialized for Art Department")
-            except Exception as e:
-                logger.warning(f"Failed to initialize Google AI Studio: {e}")
+        """Initialize Google AI Studio client and storage if not already done."""
+        if self._client is None:
+            if not settings.gemini_api_key:
+                logger.warning("GEMINI_API_KEY not configured for Art Department")
+            else:
+                try:
+                    logger.info(f"Initializing Gemini client with key prefix: {settings.gemini_api_key[:10]}...")
+                    self._client = genai.Client(api_key=settings.gemini_api_key)
+                    logger.info("Google AI Studio client initialized for Art Department")
+                except Exception as e:
+                    logger.error(f"Failed to initialize Google AI Studio client: {e}")
 
-        if self._imagen_model is None and ArtDepartmentAgent._initialized:
-            try:
-                # Use Gemini 2.5 Flash Image (Nano Banana) for image generation
-                self._imagen_model = genai.ImageGenerationModel("gemini-2.5-flash-preview-image")
-                logger.info("Gemini 2.5 Flash Image (Nano Banana) model loaded")
-            except Exception as e:
-                logger.warning(f"Failed to load Imagen 4 model: {e}")
-
-        if self._storage_client is None and settings.gcp_project_id:
-            try:
-                self._storage_client = storage.Client(project=settings.gcp_project_id)
-                logger.info("GCS client initialized")
-            except Exception as e:
-                logger.warning(f"Failed to initialize GCS client: {e}")
+        if self._storage_client is None:
+            if not settings.gcp_project_id:
+                logger.warning("GCP_PROJECT_ID not configured for Art Department")
+            else:
+                try:
+                    self._storage_client = storage.Client(project=settings.gcp_project_id)
+                    logger.info("GCS client initialized")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize GCS client: {e}")
 
     async def process(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Generate panel images from input."""
@@ -167,6 +163,9 @@ class ArtDepartmentAgent(BaseRoom):
         if panel.action:
             prompt_parts.append(f"Action: {panel.action}")
 
+        # Add negative prompt instruction
+        prompt_parts.append(f"Avoid: {NEGATIVE_PROMPT}")
+
         return ". ".join(prompt_parts)
 
     async def _generate_panel(
@@ -195,43 +194,48 @@ class ArtDepartmentAgent(BaseRoom):
 
         while retry_count < max_retries:
             try:
-                if self._imagen_model is None:
-                    logger.warning("Imagen model not initialized, returning placeholder")
+                if self._client is None:
+                    logger.warning("Gemini client not initialized, returning placeholder")
                     return self._generate_placeholder_panel(panel, prompt)
 
-                # Generate image using Imagen 4
-                response = await self._imagen_model.generate_images_async(
-                    prompt=prompt,
-                    number_of_images=1,
-                    aspect_ratio="3:4",  # Comic panel aspect ratio
-                    safety_filter_level="block_some",
-                    person_generation="allow_adult",
-                    negative_prompt=NEGATIVE_PROMPT,
+                # Generate image using Gemini 3 Pro Image
+                response = await asyncio.to_thread(
+                    self._client.models.generate_content,
+                    model="gemini-3-pro-image-preview",
+                    contents=prompt,
+                    config={
+                        "response_modalities": ["TEXT", "IMAGE"],
+                    },
                 )
 
-                if not response.images:
-                    logger.warning(f"No images generated for panel {panel.panel_number}")
-                    retry_count += 1
-                    continue
+                # Extract image from response
+                if response.candidates and len(response.candidates) > 0:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, "content") and candidate.content.parts:
+                        for part in candidate.content.parts:
+                            if hasattr(part, "inline_data") and part.inline_data is not None:
+                                # Get the image bytes
+                                image_data = part.inline_data.data
 
-                # Get the generated image
-                generated_image = response.images[0]
+                                # Upload to GCS
+                                image_url = await self._upload_to_gcs(
+                                    image_data=image_data,
+                                    hero_id=hero_id,
+                                    episode_number=episode_number,
+                                    panel_number=panel.panel_number,
+                                )
 
-                # Upload to GCS
-                image_url = await self._upload_to_gcs(
-                    image_data=generated_image._image_bytes,
-                    hero_id=hero_id,
-                    episode_number=episode_number,
-                    panel_number=panel.panel_number,
-                )
+                                return GeneratedPanel(
+                                    panel_number=panel.panel_number,
+                                    image_url=image_url,
+                                    generation_prompt=prompt,
+                                    safety_score=1.0,
+                                    retry_count=retry_count,
+                                )
 
-                return GeneratedPanel(
-                    panel_number=panel.panel_number,
-                    image_url=image_url,
-                    generation_prompt=prompt,
-                    safety_score=1.0,
-                    retry_count=retry_count,
-                )
+                logger.warning(f"No images generated for panel {panel.panel_number}")
+                retry_count += 1
+                continue
 
             except Exception as e:
                 logger.error(f"Error generating panel {panel.panel_number}: {e}")
@@ -280,10 +284,8 @@ class ArtDepartmentAgent(BaseRoom):
             blob = bucket.blob(blob_path)
             blob.upload_from_string(image_data, content_type="image/png")
 
-            # Make publicly readable (or use signed URLs for private access)
-            blob.make_public()
-
-            return blob.public_url
+            # Return GCS URI - bucket has uniform access, use signed URLs in frontend
+            return f"https://storage.googleapis.com/{self._bucket_name}/{blob_path}"
 
         except Exception as e:
             logger.error(f"Failed to upload to GCS: {e}")
@@ -312,8 +314,8 @@ class ArtDepartmentAgent(BaseRoom):
         )
 
         try:
-            if self._imagen_model is None:
-                logger.warning("Imagen model not initialized for character sheet")
+            if self._client is None:
+                logger.warning("Gemini client not initialized for character sheet")
                 return {
                     "hero_id": hero_id,
                     "hero_name": hero_name,
@@ -322,30 +324,36 @@ class ArtDepartmentAgent(BaseRoom):
                     "reference_images": [],
                 }
 
-            response = await self._imagen_model.generate_images_async(
-                prompt=prompt,
-                number_of_images=1,
-                aspect_ratio="1:1",
-                safety_filter_level="block_some",
-                person_generation="allow_adult",
-                negative_prompt=NEGATIVE_PROMPT,
+            response = await asyncio.to_thread(
+                self._client.models.generate_content,
+                model="gemini-3-pro-image-preview",
+                contents=prompt,
+                config={
+                    "response_modalities": ["TEXT", "IMAGE"],
+                },
             )
 
-            if response.images:
-                image_url = await self._upload_to_gcs(
-                    image_data=response.images[0]._image_bytes,
-                    hero_id=hero_id,
-                    episode_number=0,  # Character sheet stored at episode 0
-                    panel_number=0,
-                )
+            if response.candidates and len(response.candidates) > 0:
+                candidate = response.candidates[0]
+                if hasattr(candidate, "content") and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if hasattr(part, "inline_data") and part.inline_data is not None:
+                            image_data = part.inline_data.data
 
-                return {
-                    "hero_id": hero_id,
-                    "hero_name": hero_name,
-                    "visual_description": visual_description,
-                    "costume_description": costume_description,
-                    "reference_images": [image_url],
-                }
+                            image_url = await self._upload_to_gcs(
+                                image_data=image_data,
+                                hero_id=hero_id,
+                                episode_number=0,  # Character sheet stored at episode 0
+                                panel_number=0,
+                            )
+
+                            return {
+                                "hero_id": hero_id,
+                                "hero_name": hero_name,
+                                "visual_description": visual_description,
+                                "costume_description": costume_description,
+                                "reference_images": [image_url],
+                            }
 
         except Exception as e:
             logger.error(f"Failed to generate character sheet: {e}")
