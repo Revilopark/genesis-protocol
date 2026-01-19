@@ -36,7 +36,7 @@ class WritersRoomAgent(BaseRoom):
 
     def __init__(self) -> None:
         """Initialize the agent."""
-        self.model_name = "gemini-1.5-pro-002"
+        self.model_name = "gemini-2.0-flash"
         self._model: GenerativeModel | None = None
 
     def _ensure_initialized(self) -> None:

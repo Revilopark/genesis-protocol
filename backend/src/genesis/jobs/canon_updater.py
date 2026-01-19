@@ -40,7 +40,7 @@ class CanonUpdaterJob:
                     location=settings.gcp_location,
                 )
                 CanonUpdaterJob._initialized = True
-                self._model = GenerativeModel("gemini-1.5-pro-002")
+                self._model = GenerativeModel("gemini-2.0-flash")
                 logger.info("Vertex AI initialized for Canon Updater")
             except Exception as e:
                 logger.warning(f"Failed to initialize Vertex AI: {e}")
