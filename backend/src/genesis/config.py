@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     gcp_location: str = Field(default="us-central1")
     vertex_ai_endpoint: str | None = Field(default=None)
 
+    # Google AI Studio (Gemini API)
+    gemini_api_key: str = Field(default="")
+
     # AWS
     aws_region: str = Field(default="us-east-1")
     s3_content_bucket: str = Field(default="")

@@ -1,16 +1,10 @@
-"""Writers Room agent implementation."""
+"""Writers Room agent implementation using Google AI Studio."""
 
 import json
 import logging
 from typing import Any
 
-import vertexai
-from vertexai.generative_models import (
-    GenerationConfig,
-    GenerativeModel,
-    HarmBlockThreshold,
-    HarmCategory,
-)
+import google.generativeai as genai
 
 from genesis.config import settings
 from genesis.rooms.base import BaseRoom
@@ -21,7 +15,6 @@ from genesis.rooms.writers_room.prompts import (
 )
 from genesis.rooms.writers_room.schemas import (
     EpisodeScript,
-    PanelDescription,
     WritersRoomInput,
     WritersRoomOutput,
 )
@@ -30,30 +23,27 @@ logger = logging.getLogger(__name__)
 
 
 class WritersRoomAgent(BaseRoom):
-    """Writers Room agent for narrative generation using Gemini."""
+    """Writers Room agent for narrative generation using Gemini 2.5 Pro."""
 
     _initialized: bool = False
 
     def __init__(self) -> None:
         """Initialize the agent."""
-        self.model_name = "gemini-2.0-flash"
-        self._model: GenerativeModel | None = None
+        self.model_name = "gemini-2.5-pro"
+        self._model: genai.GenerativeModel | None = None
 
     def _ensure_initialized(self) -> None:
-        """Initialize Vertex AI if not already done."""
-        if not WritersRoomAgent._initialized and settings.gcp_project_id:
+        """Initialize Google AI Studio if not already done."""
+        if not WritersRoomAgent._initialized and settings.gemini_api_key:
             try:
-                vertexai.init(
-                    project=settings.gcp_project_id,
-                    location=settings.gcp_location,
-                )
+                genai.configure(api_key=settings.gemini_api_key)
                 WritersRoomAgent._initialized = True
-                logger.info("Vertex AI initialized for Writers Room")
+                logger.info("Google AI Studio initialized for Writers Room")
             except Exception as e:
-                logger.warning(f"Failed to initialize Vertex AI: {e}")
+                logger.warning(f"Failed to initialize Google AI Studio: {e}")
 
         if self._model is None and WritersRoomAgent._initialized:
-            self._model = GenerativeModel(
+            self._model = genai.GenerativeModel(
                 self.model_name,
                 system_instruction=SYSTEM_PROMPT,
             )
@@ -116,46 +106,46 @@ class WritersRoomAgent(BaseRoom):
 
         return prompt
 
-    def _get_generation_config(self, input_data: WritersRoomInput) -> GenerationConfig:
+    def _get_generation_config(self, input_data: WritersRoomInput) -> dict[str, Any]:
         """Get generation config based on content settings."""
-        return GenerationConfig(
-            temperature=0.9,
-            top_p=0.95,
-            top_k=40,
-            max_output_tokens=8192,
-            response_mime_type="application/json",
-        )
+        return {
+            "temperature": 0.9,
+            "top_p": 0.95,
+            "top_k": 40,
+            "max_output_tokens": 8192,
+            "response_mime_type": "application/json",
+        }
 
-    def _get_safety_settings(self, input_data: WritersRoomInput) -> dict[HarmCategory, HarmBlockThreshold]:
+    def _get_safety_settings(self, input_data: WritersRoomInput) -> list[dict[str, str]]:
         """Get safety settings based on content settings."""
         violence_level = input_data.content_settings.get("violence_level", 1)
 
         # Adjust safety thresholds based on violence level
         if violence_level == 1:  # Mild
-            violence_threshold = HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
+            harm_threshold = "BLOCK_LOW_AND_ABOVE"
         elif violence_level == 2:  # Moderate
-            violence_threshold = HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
+            harm_threshold = "BLOCK_MEDIUM_AND_ABOVE"
         else:  # Action-Heavy
-            violence_threshold = HarmBlockThreshold.BLOCK_ONLY_HIGH
+            harm_threshold = "BLOCK_ONLY_HIGH"
 
-        return {
-            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
-        }
+        return [
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_LOW_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_LOW_AND_ABOVE"},
+        ]
 
     async def _generate_script(
         self,
         prompt: str,
         input_data: WritersRoomInput,
     ) -> EpisodeScript:
-        """Generate script using Gemini."""
+        """Generate script using Gemini 2.5 Pro."""
         self._ensure_initialized()
 
-        # If Vertex AI not initialized, return fallback
+        # If Google AI Studio not initialized, return fallback
         if self._model is None:
-            logger.warning("Vertex AI not initialized, returning fallback script")
+            logger.warning("Google AI Studio not initialized, returning fallback script")
             return self._generate_fallback_script(input_data)
 
         try:

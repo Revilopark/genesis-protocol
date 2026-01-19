@@ -1,15 +1,13 @@
-"""Art Department agent implementation using Imagen 3."""
+"""Art Department agent implementation using Imagen 4."""
 
 import asyncio
-import base64
 import logging
 import time
 import uuid
 from typing import Any
 
-import vertexai
+import google.generativeai as genai
 from google.cloud import storage
-from vertexai.preview.vision_models import ImageGenerationModel
 
 from genesis.config import settings
 from genesis.rooms.base import BaseRoom
@@ -39,35 +37,33 @@ NEGATIVE_PROMPT = (
 
 
 class ArtDepartmentAgent(BaseRoom):
-    """Art Department agent for image generation using Imagen 3."""
+    """Art Department agent for image generation using Imagen 4."""
 
     _initialized: bool = False
 
     def __init__(self) -> None:
         """Initialize the agent."""
-        self._model: ImageGenerationModel | None = None
+        self._imagen_model: genai.ImageGenerationModel | None = None
         self._storage_client: storage.Client | None = None
         self._bucket_name = f"{settings.gcp_project_id}-genesis-assets"
 
     def _ensure_initialized(self) -> None:
-        """Initialize Vertex AI and storage if not already done."""
-        if not ArtDepartmentAgent._initialized and settings.gcp_project_id:
+        """Initialize Google AI Studio and storage if not already done."""
+        if not ArtDepartmentAgent._initialized and settings.gemini_api_key:
             try:
-                vertexai.init(
-                    project=settings.gcp_project_id,
-                    location=settings.gcp_location,
-                )
+                genai.configure(api_key=settings.gemini_api_key)
                 ArtDepartmentAgent._initialized = True
-                logger.info("Vertex AI initialized for Art Department")
+                logger.info("Google AI Studio initialized for Art Department")
             except Exception as e:
-                logger.warning(f"Failed to initialize Vertex AI: {e}")
+                logger.warning(f"Failed to initialize Google AI Studio: {e}")
 
-        if self._model is None and ArtDepartmentAgent._initialized:
+        if self._imagen_model is None and ArtDepartmentAgent._initialized:
             try:
-                self._model = ImageGenerationModel.from_pretrained("imagen-3.0-generate-001")
-                logger.info("Imagen 3 model loaded")
+                # Use Gemini 2.5 Flash Image (Nano Banana) for image generation
+                self._imagen_model = genai.ImageGenerationModel("gemini-2.5-flash-preview-image")
+                logger.info("Gemini 2.5 Flash Image (Nano Banana) model loaded")
             except Exception as e:
-                logger.warning(f"Failed to load Imagen 3 model: {e}")
+                logger.warning(f"Failed to load Imagen 4 model: {e}")
 
         if self._storage_client is None and settings.gcp_project_id:
             try:
@@ -199,12 +195,12 @@ class ArtDepartmentAgent(BaseRoom):
 
         while retry_count < max_retries:
             try:
-                if self._model is None:
+                if self._imagen_model is None:
                     logger.warning("Imagen model not initialized, returning placeholder")
                     return self._generate_placeholder_panel(panel, prompt)
 
-                # Generate image using Imagen 3
-                response = self._model.generate_images(
+                # Generate image using Imagen 4
+                response = await self._imagen_model.generate_images_async(
                     prompt=prompt,
                     number_of_images=1,
                     aspect_ratio="3:4",  # Comic panel aspect ratio
@@ -316,7 +312,7 @@ class ArtDepartmentAgent(BaseRoom):
         )
 
         try:
-            if self._model is None:
+            if self._imagen_model is None:
                 logger.warning("Imagen model not initialized for character sheet")
                 return {
                     "hero_id": hero_id,
@@ -326,7 +322,7 @@ class ArtDepartmentAgent(BaseRoom):
                     "reference_images": [],
                 }
 
-            response = self._model.generate_images(
+            response = await self._imagen_model.generate_images_async(
                 prompt=prompt,
                 number_of_images=1,
                 aspect_ratio="1:1",

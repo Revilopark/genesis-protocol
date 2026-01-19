@@ -11,8 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-import vertexai
-from vertexai.generative_models import GenerativeModel
+import google.generativeai as genai
 
 from genesis.config import settings
 from genesis.core.database import get_session
@@ -29,21 +28,18 @@ class CanonUpdaterJob:
 
     def __init__(self) -> None:
         """Initialize the job."""
-        self._model: GenerativeModel | None = None
+        self._model: genai.GenerativeModel | None = None
 
     def _ensure_initialized(self) -> None:
-        """Initialize Vertex AI if not already done."""
-        if not CanonUpdaterJob._initialized and settings.gcp_project_id:
+        """Initialize Google AI Studio if not already done."""
+        if not CanonUpdaterJob._initialized and settings.gemini_api_key:
             try:
-                vertexai.init(
-                    project=settings.gcp_project_id,
-                    location=settings.gcp_location,
-                )
+                genai.configure(api_key=settings.gemini_api_key)
                 CanonUpdaterJob._initialized = True
-                self._model = GenerativeModel("gemini-2.0-flash")
-                logger.info("Vertex AI initialized for Canon Updater")
+                self._model = genai.GenerativeModel("gemini-2.5-pro")
+                logger.info("Google AI Studio initialized for Canon Updater")
             except Exception as e:
-                logger.warning(f"Failed to initialize Vertex AI: {e}")
+                logger.warning(f"Failed to initialize Google AI Studio: {e}")
 
     async def run(self) -> dict[str, Any]:
         """Run the canon update job.
