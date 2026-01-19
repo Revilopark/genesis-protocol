@@ -1,24 +1,38 @@
 """Redis client for caching and pub/sub."""
 
+import logging
 from typing import AsyncGenerator
 
 import redis.asyncio as redis
 
 from genesis.config import settings
 
+logger = logging.getLogger(__name__)
+
 _redis_client: redis.Redis | None = None  # type: ignore[type-arg]
+_redis_available: bool = False
 
 
 async def init_redis() -> None:
     """Initialize Redis connection."""
-    global _redis_client
-    _redis_client = redis.from_url(
-        settings.redis_url,
-        encoding="utf-8",
-        decode_responses=True,
-    )
-    # Verify connectivity
-    await _redis_client.ping()
+    global _redis_client, _redis_available
+    try:
+        _redis_client = redis.from_url(
+            settings.redis_url,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=5,
+        )
+        # Verify connectivity
+        await _redis_client.ping()
+        _redis_available = True
+        logger.info("Redis connection established successfully")
+    except Exception as e:
+        logger.warning(f"Failed to connect to Redis: {e}. Caching will be unavailable.")
+        _redis_available = False
+        if _redis_client:
+            await _redis_client.aclose()
+            _redis_client = None
 
 
 async def close_redis() -> None:
