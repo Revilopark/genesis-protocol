@@ -13,13 +13,11 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 
 # Install dependencies
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+RUN uv sync --frozen --no-install-project --no-dev
 
 # Copy application code
 COPY src/ src/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev
 
 
 # Runtime stage
@@ -45,12 +43,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Switch to non-root user
 USER appuser
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/health')" || exit 1
+# Health check (disabled for Cloud Run which has its own health checks)
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+#     CMD python -c "import httpx; httpx.get('http://localhost:8080/health')" || exit 1
 
-# Expose port
-EXPOSE 8000
+# Expose port (Cloud Run uses PORT env var, default 8080)
+EXPOSE 8080
 
-# Run the application
-CMD ["uvicorn", "genesis.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the application using shell form to expand PORT variable
+CMD uvicorn genesis.main:app --host 0.0.0.0 --port ${PORT:-8080}
