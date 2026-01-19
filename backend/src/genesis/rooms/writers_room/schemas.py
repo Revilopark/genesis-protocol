@@ -39,7 +39,7 @@ class WritersRoomInput(BaseModel):
     origin_story: str
     episode_number: int
     previous_episodes_summary: str | None = None
-    active_canon_events: list[dict[str, str]] = Field(default_factory=list)
+    active_canon_events: list[dict[str, str | int | float]] = Field(default_factory=list)
     current_location: str | None = None
     include_crossover: bool = False
     crossover_hero: dict[str, str] | None = None

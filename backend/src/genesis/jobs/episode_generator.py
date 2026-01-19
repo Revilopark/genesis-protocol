@@ -220,6 +220,7 @@ class EpisodeGeneratorJob:
 
         # Step 1: Generate script with Writers Room
         writers_input = {
+            "hero_id": hero_id,
             "hero_name": hero_name,
             "power_type": hero.get("power_type", "Unknown"),
             "origin_story": hero.get("origin_story", ""),
