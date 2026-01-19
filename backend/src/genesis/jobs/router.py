@@ -157,3 +157,113 @@ async def get_jobs_status() -> dict[str, Any]:
         ],
         "environment": settings.environment,
     }
+
+
+@router.post("/seed-test-data")
+async def seed_test_data() -> dict[str, Any]:
+    """Seed test data for development and pilot testing.
+
+    Creates sample heroes, guardians, and canon events.
+    Only available in non-production environments.
+    """
+    if settings.environment == "production":
+        raise HTTPException(status_code=403, detail="Not available in production")
+
+    from genesis.core.database import get_session
+
+    created = {"heroes": [], "guardians": [], "events": []}
+
+    try:
+        async with get_session() as session:
+            # Create test guardian
+            result = await session.run(
+                """
+                MERGE (g:Guardian {id: 'guardian-test-001'})
+                ON CREATE SET
+                    g.email = 'test.guardian@example.com',
+                    g.name = 'Test Guardian',
+                    g.verified = true,
+                    g.created_at = datetime()
+                RETURN g.id as id
+                """
+            )
+            record = await result.single()
+            if record:
+                created["guardians"].append(record["id"])
+
+            # Create test heroes
+            heroes = [
+                {
+                    "id": "hero-test-001",
+                    "user_id": "user-test-001",
+                    "hero_name": "Nova Storm",
+                    "power_type": "Cosmic Energy Manipulation",
+                    "origin_story": "During a meteor shower that opened a rift to another dimension, discovered the ability to channel cosmic energy.",
+                },
+                {
+                    "id": "hero-test-002",
+                    "user_id": "user-test-002",
+                    "hero_name": "Shadow Strike",
+                    "power_type": "Darkness Control",
+                    "origin_story": "Born with the ability to manipulate shadows, trained in stealth and precision.",
+                },
+                {
+                    "id": "hero-test-003",
+                    "user_id": "user-test-003",
+                    "hero_name": "Crystal Guardian",
+                    "power_type": "Earth/Crystal",
+                    "origin_story": "Discovered an ancient crystal that bonded with their body, granting control over minerals.",
+                },
+            ]
+
+            for hero in heroes:
+                result = await session.run(
+                    """
+                    MERGE (h:Hero {id: $id})
+                    ON CREATE SET
+                        h.user_id = $user_id,
+                        h.hero_name = $hero_name,
+                        h.power_type = $power_type,
+                        h.origin_story = $origin_story,
+                        h.current_location = 'Metropolis Prime',
+                        h.status = 'active',
+                        h.episode_count = 0,
+                        h.significance_score = 0,
+                        h.created_at = datetime(),
+                        h.content_settings = {violence_level: 1, language_filter: true}
+                    WITH h
+                    MATCH (g:Guardian {id: 'guardian-test-001'})
+                    MERGE (h)-[:SPONSORED_BY]->(g)
+                    RETURN h.id as id
+                    """,
+                    **hero,
+                )
+                record = await result.single()
+                if record:
+                    created["heroes"].append(record["id"])
+
+            # Create a global event
+            result = await session.run(
+                """
+                MERGE (e:Event {id: 'event-fractured-sky'})
+                ON CREATE SET
+                    e.title = 'The Fractured Sky',
+                    e.description = 'Mysterious cracks have appeared in the sky above major cities. Strange energy emanates from these rifts, and unknown creatures have begun emerging.',
+                    e.layer = 'canon',
+                    e.status = 'active',
+                    e.significance_score = 100,
+                    e.start_date = date(),
+                    e.created_at = datetime()
+                RETURN e.id as id
+                """
+            )
+            record = await result.single()
+            if record:
+                created["events"].append(record["id"])
+
+        logger.info(f"Seeded test data: {created}")
+        return {"status": "success", "created": created}
+
+    except Exception as e:
+        logger.error(f"Failed to seed test data: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to seed data: {str(e)}")
