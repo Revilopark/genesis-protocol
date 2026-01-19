@@ -50,6 +50,8 @@ jobs:
             --set-secrets "NEO4J_PASSWORD=neo4j-password:latest" \
             --set-secrets "JWT_SECRET_KEY=jwt-secret:latest" \
             --set-secrets "REDIS_URL=redis-url:latest" \
+            --vpc-connector inkwell-connector \
+            --vpc-egress private-ranges-only \
             --min-instances 0 \
             --max-instances 10 \
             --memory 2Gi \
