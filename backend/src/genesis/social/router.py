@@ -1,5 +1,6 @@
 """Social graph API routes."""
 
+from enum import Enum
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -12,7 +13,7 @@ from genesis.core.database import get_db
 router = APIRouter()
 
 
-class ConnectionStatus(BaseModel):
+class ConnectionStatus(str, Enum):
     """Connection status enum."""
 
     PENDING = "pending"
