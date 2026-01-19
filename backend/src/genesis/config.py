@@ -61,8 +61,9 @@ class Settings(BaseSettings):
     cloudflare_api_token: str | None = Field(default=None)
     cloudflare_zone_id: str | None = Field(default=None)
 
-    # CORS
-    cors_origins: list[str] = Field(default=["http://localhost:3000"])
+    # CORS - use "*" to allow all origins in production
+    # Cloud Run URLs are dynamic, so we allow all origins
+    cors_origins: list[str] = Field(default=["*"])
 
     # Rate Limiting
     rate_limit_requests_per_minute: int = Field(default=60)
