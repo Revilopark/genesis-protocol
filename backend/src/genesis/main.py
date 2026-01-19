@@ -17,6 +17,7 @@ from genesis.canon.router import router as canon_router
 from genesis.content.router import router as content_router
 from genesis.guardian.router import router as guardian_router
 from genesis.heroes.router import router as heroes_router
+from genesis.jobs.router import router as jobs_router
 from genesis.moderation.router import router as moderation_router
 from genesis.social.router import router as social_router
 
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(content_router, prefix="/api/v1/content", tags=["Content"])
     app.include_router(guardian_router, prefix="/api/v1/guardian", tags=["Guardian"])
     app.include_router(moderation_router, prefix="/api/v1/moderation", tags=["Moderation"])
+    app.include_router(jobs_router, prefix="/api/v1/jobs", tags=["Jobs"])
 
     # Health check
     @app.get("/health")

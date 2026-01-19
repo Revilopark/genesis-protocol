@@ -1,7 +1,16 @@
 """Writers Room agent implementation."""
 
 import json
+import logging
 from typing import Any
+
+import vertexai
+from vertexai.generative_models import (
+    GenerationConfig,
+    GenerativeModel,
+    HarmBlockThreshold,
+    HarmCategory,
+)
 
 from genesis.config import settings
 from genesis.rooms.base import BaseRoom
@@ -12,19 +21,42 @@ from genesis.rooms.writers_room.prompts import (
 )
 from genesis.rooms.writers_room.schemas import (
     EpisodeScript,
+    PanelDescription,
     WritersRoomInput,
     WritersRoomOutput,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class WritersRoomAgent(BaseRoom):
     """Writers Room agent for narrative generation using Gemini."""
 
+    _initialized: bool = False
+
     def __init__(self) -> None:
         """Initialize the agent."""
-        self.model_name = "gemini-1.5-pro"
-        # In production, initialize Vertex AI client here
-        # self.client = vertexai.generative_models.GenerativeModel(self.model_name)
+        self.model_name = "gemini-1.5-pro-002"
+        self._model: GenerativeModel | None = None
+
+    def _ensure_initialized(self) -> None:
+        """Initialize Vertex AI if not already done."""
+        if not WritersRoomAgent._initialized and settings.gcp_project_id:
+            try:
+                vertexai.init(
+                    project=settings.gcp_project_id,
+                    location=settings.gcp_location,
+                )
+                WritersRoomAgent._initialized = True
+                logger.info("Vertex AI initialized for Writers Room")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Vertex AI: {e}")
+
+        if self._model is None and WritersRoomAgent._initialized:
+            self._model = GenerativeModel(
+                self.model_name,
+                system_instruction=SYSTEM_PROMPT,
+            )
 
     async def process(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Generate episode script from input."""
@@ -33,8 +65,7 @@ class WritersRoomAgent(BaseRoom):
         # Build the prompt
         prompt = self._build_prompt(validated_input)
 
-        # In production, call Gemini API
-        # For now, return a placeholder
+        # Generate script using Gemini
         script = await self._generate_script(prompt, validated_input)
 
         output = WritersRoomOutput(script=script)
@@ -75,7 +106,8 @@ class WritersRoomAgent(BaseRoom):
             power_type=input_data.power_type,
             origin_story=input_data.origin_story,
             current_location=input_data.current_location or "Metropolis Prime",
-            previous_episodes_summary=input_data.previous_episodes_summary or "This is the hero's first adventure.",
+            previous_episodes_summary=input_data.previous_episodes_summary
+            or "This is the hero's first adventure.",
             canon_events_text=canon_events_text,
             violence_level=input_data.content_settings.get("violence_level", 1),
             language_filter=input_data.content_settings.get("language_filter", True),
@@ -84,35 +116,179 @@ class WritersRoomAgent(BaseRoom):
 
         return prompt
 
+    def _get_generation_config(self, input_data: WritersRoomInput) -> GenerationConfig:
+        """Get generation config based on content settings."""
+        return GenerationConfig(
+            temperature=0.9,
+            top_p=0.95,
+            top_k=40,
+            max_output_tokens=8192,
+            response_mime_type="application/json",
+        )
+
+    def _get_safety_settings(self, input_data: WritersRoomInput) -> dict[HarmCategory, HarmBlockThreshold]:
+        """Get safety settings based on content settings."""
+        violence_level = input_data.content_settings.get("violence_level", 1)
+
+        # Adjust safety thresholds based on violence level
+        if violence_level == 1:  # Mild
+            violence_threshold = HarmBlockThreshold.BLOCK_LOW_AND_ABOVE
+        elif violence_level == 2:  # Moderate
+            violence_threshold = HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE
+        else:  # Action-Heavy
+            violence_threshold = HarmBlockThreshold.BLOCK_ONLY_HIGH
+
+        return {
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+        }
+
     async def _generate_script(
         self,
         prompt: str,
         input_data: WritersRoomInput,
     ) -> EpisodeScript:
-        """Generate script using Gemini (placeholder implementation)."""
-        # TODO: Implement actual Gemini API call
-        # For now, return a placeholder script
+        """Generate script using Gemini."""
+        self._ensure_initialized()
+
+        # If Vertex AI not initialized, return fallback
+        if self._model is None:
+            logger.warning("Vertex AI not initialized, returning fallback script")
+            return self._generate_fallback_script(input_data)
+
+        try:
+            generation_config = self._get_generation_config(input_data)
+            safety_settings = self._get_safety_settings(input_data)
+
+            # Add JSON schema instruction to prompt
+            json_instruction = """
+Output your response as a valid JSON object with this exact structure:
+{
+    "title": "Episode title",
+    "synopsis": "Brief episode summary",
+    "panels": [
+        {
+            "panel_number": 1,
+            "visual_prompt": "Detailed description for image generation",
+            "dialogue": [{"character": "Name", "text": "What they say"}],
+            "caption": "Narrative caption or null",
+            "action": "What happens in this panel"
+        }
+    ],
+    "canon_references": ["list of canon elements referenced"],
+    "tags": ["action", "mystery", etc.]
+}
+
+Generate exactly 8-10 panels for this episode.
+"""
+            full_prompt = prompt + "\n\n" + json_instruction
+
+            response = await self._model.generate_content_async(
+                full_prompt,
+                generation_config=generation_config,
+                safety_settings=safety_settings,
+            )
+
+            # Parse the response
+            response_text = response.text.strip()
+
+            # Handle potential markdown code blocks
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                response_text = "\n".join(lines[1:-1])
+
+            script_data = json.loads(response_text)
+
+            # Validate and create EpisodeScript
+            return EpisodeScript(
+                title=script_data.get("title", f"Episode {input_data.episode_number}"),
+                synopsis=script_data.get("synopsis", ""),
+                panels=script_data.get("panels", []),
+                canon_references=script_data.get("canon_references", []),
+                tags=script_data.get("tags", []),
+            )
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Gemini response as JSON: {e}")
+            return self._generate_fallback_script(input_data)
+        except Exception as e:
+            logger.error(f"Error generating script with Gemini: {e}")
+            return self._generate_fallback_script(input_data)
+
+    def _generate_fallback_script(self, input_data: WritersRoomInput) -> EpisodeScript:
+        """Generate a fallback script when Gemini is unavailable."""
         return EpisodeScript(
             title=f"Episode {input_data.episode_number}: A New Challenge",
             synopsis=f"{input_data.hero_name} faces an unexpected challenge in their journey as a hero.",
             panels=[
                 {
                     "panel_number": 1,
-                    "visual_prompt": f"Wide shot of {input_data.hero_name} standing on a rooftop at sunset, city skyline behind them.",
+                    "visual_prompt": f"Wide establishing shot of a futuristic city at golden hour. {input_data.hero_name} stands on a tall building rooftop, cape flowing in the wind. The city skyline stretches into the distance with flying vehicles.",
                     "dialogue": [],
-                    "caption": "Every hero's journey begins with a single step...",
-                    "action": f"{input_data.hero_name} surveys the city",
+                    "caption": "In a world where heroes are born every day, one stands ready to make their mark...",
+                    "action": f"{input_data.hero_name} surveys the city from above",
                 },
                 {
                     "panel_number": 2,
-                    "visual_prompt": "Close-up of the hero's face, determined expression, wind blowing their hair.",
+                    "visual_prompt": f"Medium shot of {input_data.hero_name}'s face in profile, determined expression. City lights reflect in their eyes. Wind-swept hair adds dynamic movement.",
                     "dialogue": [
-                        {"character": input_data.hero_name, "text": "Time to make a difference."}
+                        {"character": input_data.hero_name, "text": "The city needs me."}
                     ],
                     "caption": None,
-                    "action": "Hero prepares for action",
+                    "action": "Hero's resolve strengthens",
+                },
+                {
+                    "panel_number": 3,
+                    "visual_prompt": "Street level view of a chaotic scene. Citizens running in panic. Smoke rises from a nearby building. Emergency lights flash.",
+                    "dialogue": [],
+                    "caption": "But tonight, something is different...",
+                    "action": "Chaos erupts in the streets below",
+                },
+                {
+                    "panel_number": 4,
+                    "visual_prompt": f"Dynamic action shot of {input_data.hero_name} leaping from the rooftop, body in a heroic diving pose. Motion blur emphasizes speed.",
+                    "dialogue": [
+                        {"character": input_data.hero_name, "text": "Time to be a hero!"}
+                    ],
+                    "caption": None,
+                    "action": "Hero launches into action",
+                },
+                {
+                    "panel_number": 5,
+                    "visual_prompt": f"Ground level shot looking up as {input_data.hero_name} lands dramatically in a three-point stance. Dust and debris scatter from the impact.",
+                    "dialogue": [],
+                    "caption": "With powers that set them apart from ordinary citizens...",
+                    "action": "Hero lands dramatically",
+                },
+                {
+                    "panel_number": 6,
+                    "visual_prompt": f"Close-up of {input_data.hero_name}'s hands as their {input_data.power_type.lower()} powers activate. Energy or effects appropriate to their power type surround them.",
+                    "dialogue": [],
+                    "caption": None,
+                    "action": "Powers manifest",
+                },
+                {
+                    "panel_number": 7,
+                    "visual_prompt": "Wide shot of the hero confronting the source of danger. Dramatic lighting with the threat silhouetted against flames or destruction.",
+                    "dialogue": [
+                        {"character": input_data.hero_name, "text": "This ends now!"}
+                    ],
+                    "caption": "Every hero must face their first true test.",
+                    "action": "Hero confronts the threat",
+                },
+                {
+                    "panel_number": 8,
+                    "visual_prompt": f"Triumphant shot of {input_data.hero_name} standing amid cleared rubble, helping a grateful citizen to their feet. Sun breaking through clouds in background.",
+                    "dialogue": [
+                        {"character": "Citizen", "text": "Thank you! You saved us!"},
+                        {"character": input_data.hero_name, "text": "Just doing what's right."},
+                    ],
+                    "caption": "And in that moment, a legend begins.",
+                    "action": "Hero saves the day",
                 },
             ],
             canon_references=[],
-            tags=["action", "origin"],
+            tags=["action", "origin", "heroic"],
         )
