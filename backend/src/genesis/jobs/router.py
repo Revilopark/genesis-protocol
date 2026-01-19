@@ -160,14 +160,18 @@ async def get_jobs_status() -> dict[str, Any]:
 
 
 @router.post("/seed-test-data")
-async def seed_test_data() -> dict[str, Any]:
+async def seed_test_data(
+    x_admin_token: str | None = Header(None),
+) -> dict[str, Any]:
     """Seed test data for development and pilot testing.
 
     Creates sample heroes, guardians, and canon events.
-    Only available in non-production environments.
+    Requires admin token in production.
     """
-    if settings.environment == "production":
-        raise HTTPException(status_code=403, detail="Not available in production")
+    # Allow in non-production or with admin token
+    admin_token = "genesis-admin-seed-2026"
+    if settings.environment == "production" and x_admin_token != admin_token:
+        raise HTTPException(status_code=403, detail="Admin token required in production")
 
     from genesis.core.database import get_session
 
