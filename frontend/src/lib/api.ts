@@ -33,6 +33,9 @@ export interface Child {
   hero_id: string;
   status: string;
   created_at: string;
+  episode_count: number;
+  last_active_at: string | null;
+  pending_connections: number;
 }
 
 export interface ConnectionRequest {
