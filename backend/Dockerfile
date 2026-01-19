@@ -34,6 +34,9 @@ WORKDIR /app
 # Copy virtual environment from builder
 COPY --from=builder --chown=appuser:appgroup /app/.venv /app/.venv
 
+# Copy source code (needed for editable install)
+COPY --from=builder --chown=appuser:appgroup /app/src /app/src
+
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
