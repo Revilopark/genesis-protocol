@@ -51,6 +51,7 @@ export interface Episode {
   title: string;
   summary: string;
   created_at: string;
+  published_at: string;
   comic_url?: string;
   video_url?: string;
 }
