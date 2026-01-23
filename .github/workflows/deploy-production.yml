@@ -13,7 +13,9 @@ on:
         type: string
 
 env:
-  AWS_REGION: us-east-1
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  REGISTRY: us-central1-docker.pkg.dev
 
 jobs:
   validate:
@@ -31,31 +33,65 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Setup Kustomize
-        uses: imranismail/setup-kustomize@v2
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
 
-      - name: Update image tags in production overlay
+      - name: Deploy Backend to Cloud Run
         run: |
-          cd infra/kubernetes/overlays/production
-          kustomize edit set image \
-            genesis-api=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/genesis-api:${{ github.event.inputs.image_tag }} \
-            genesis-frontend=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/genesis-frontend:${{ github.event.inputs.image_tag }}
+          gcloud run deploy genesis-api \
+            --image ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/genesis/genesis-api:${{ github.event.inputs.image_tag }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 8080 \
+            --set-env-vars "ENVIRONMENT=production" \
+            --set-env-vars "DEBUG=false" \
+            --set-secrets "NEO4J_URI=neo4j-uri:latest" \
+            --set-secrets "NEO4J_USER=neo4j-user:latest" \
+            --set-secrets "NEO4J_PASSWORD=neo4j-password:latest" \
+            --set-secrets "JWT_SECRET_KEY=jwt-secret:latest" \
+            --set-secrets "REDIS_URL=redis-url:latest" \
+            --set-secrets "GEMINI_API_KEY=gemini-api-key:latest" \
+            --min-instances 1 \
+            --max-instances 10 \
+            --memory 2Gi \
+            --cpu 2
 
-      - name: Commit and push
+      - name: Get Backend URL
+        id: backend-url
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .
-          git diff --staged --quiet || git commit -m "chore(prod): deploy ${{ github.event.inputs.image_tag }} to production"
-          git push
+          URL=$(gcloud run services describe genesis-api --region ${{ env.REGION }} --format='value(status.url)')
+          echo "url=$URL" >> $GITHUB_OUTPUT
 
-      - name: Notify deployment
+      - name: Deploy Frontend to Cloud Run
         run: |
+          gcloud run deploy genesis-frontend \
+            --image ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/genesis/genesis-frontend:${{ github.event.inputs.image_tag }} \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 3000 \
+            --set-env-vars "NEXT_PUBLIC_API_URL=${{ steps.backend-url.outputs.url }}" \
+            --min-instances 1 \
+            --max-instances 5 \
+            --memory 1Gi \
+            --cpu 1
+
+      - name: Output deployment summary
+        run: |
+          FRONTEND_URL=$(gcloud run services describe genesis-frontend --region ${{ env.REGION }} --format='value(status.url)')
           echo "## Production Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Image Tag**: ${{ github.event.inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Backend URL**: ${{ steps.backend-url.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Frontend URL**: $FRONTEND_URL" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployed By**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Time**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

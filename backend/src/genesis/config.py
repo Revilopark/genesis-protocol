@@ -53,9 +53,8 @@ class Settings(BaseSettings):
     # Google AI Studio (Gemini API)
     gemini_api_key: str = Field(default="")
 
-    # AWS
-    aws_region: str = Field(default="us-east-1")
-    s3_content_bucket: str = Field(default="")
+    # Google Cloud Storage (content delivery)
+    gcs_content_bucket: str = Field(default="")
 
     # Cloudflare
     cloudflare_api_token: str | None = Field(default=None)
