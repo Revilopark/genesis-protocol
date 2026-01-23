@@ -9,6 +9,7 @@ from genesis.auth.dependencies import get_current_guardian, get_current_user
 from genesis.core.database import get_db
 from genesis.heroes.schemas import (
     HeroCreate,
+    HeroEpisode,
     HeroResponse,
     HeroSummary,
     HeroUpdate,
@@ -102,3 +103,38 @@ async def get_guardian_children(
     service = HeroService(session)
     # Guardian's ID is their sponsor_id in the system
     return await service.get_guardian_children(guardian["id"])
+
+
+@router.get("/{hero_id}/episodes", response_model=list[HeroEpisode])
+async def get_hero_episodes(
+    hero_id: str,
+    current_user: Annotated[dict[str, str], Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=50)] = 10,
+) -> list[HeroEpisode]:
+    """Get all episodes for a hero."""
+    service = HeroService(session)
+    return await service.get_hero_episodes(hero_id, limit)
+
+
+@router.get("/{hero_id}/episodes/latest", response_model=HeroEpisode)
+async def get_hero_latest_episode(
+    hero_id: str,
+    current_user: Annotated[dict[str, str], Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> HeroEpisode:
+    """Get the latest episode for a hero."""
+    service = HeroService(session)
+    return await service.get_hero_latest_episode(hero_id)
+
+
+@router.get("/{hero_id}/episodes/{episode_number}", response_model=HeroEpisode)
+async def get_hero_episode(
+    hero_id: str,
+    episode_number: int,
+    current_user: Annotated[dict[str, str], Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> HeroEpisode:
+    """Get a specific episode by number."""
+    service = HeroService(session)
+    return await service.get_hero_episode(hero_id, episode_number)

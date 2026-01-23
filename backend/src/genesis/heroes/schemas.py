@@ -91,3 +91,59 @@ class HeroWithEpisodes(BaseModel):
 
     hero: HeroResponse
     recent_episodes: list[EpisodeSummary]
+
+
+class PanelDialogue(BaseModel):
+    """Dialogue in a panel."""
+
+    character: str
+    text: str
+
+
+class Panel(BaseModel):
+    """Panel in an episode."""
+
+    panel_number: int
+    image_url: str | None = None
+    generation_prompt: str | None = None
+    visual_prompt: str | None = None
+    dialogue: list[PanelDialogue] = Field(default_factory=list)
+    caption: str | None = None
+    action: str | None = None
+    safety_score: float = 1.0
+    retry_count: int = 0
+
+
+class Script(BaseModel):
+    """Episode script."""
+
+    title: str
+    synopsis: str
+    panels: list[Panel]
+    canon_references: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class VideoInfo(BaseModel):
+    """Video information."""
+
+    video_url: str
+    duration_seconds: float
+    resolution: str
+    format: str
+    file_size_mb: float
+
+
+class HeroEpisode(BaseModel):
+    """Full episode detail response."""
+
+    hero_id: str
+    episode_number: int
+    title: str
+    synopsis: str
+    script: Script
+    panels: list[Panel]
+    video: VideoInfo | None = None
+    tags: list[str] = Field(default_factory=list)
+    canon_references: list[str] = Field(default_factory=list)
+    generated_at: datetime

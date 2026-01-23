@@ -380,6 +380,100 @@ async def link_child_account(
         raise ValueError("Failed to link child account")
 
 
+class PendingConnection(BaseModel):
+    """Pending connection request for guardian approval."""
+
+    id: str
+    hero_id: str
+    hero_name: str
+    requester_hero_id: str
+    requester_hero_name: str
+    requested_at: datetime
+
+
+@router.get("/pending-approvals", response_model=list[PendingConnection])
+async def get_pending_approvals(
+    guardian: Annotated[dict[str, str], Depends(get_current_guardian)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> list[PendingConnection]:
+    """Get all pending connection requests for guardian's children."""
+    query = """
+    MATCH (hero:Hero)-[:SPONSORED_BY]->(s:SponsorNode {id: $sponsor_id})
+    MATCH (hero)<-[c:CONNECTED_TO {status: 'pending_guardian_approval'}]-(requester:Hero)
+    RETURN c.id as id, hero.id as hero_id, hero.hero_name as hero_name,
+           requester.id as requester_hero_id, requester.hero_name as requester_hero_name,
+           c.initiated_at as requested_at
+    ORDER BY c.initiated_at DESC
+    """
+    result = await session.run(query, sponsor_id=guardian["id"])
+    records = await result.fetch(50)
+    return [
+        PendingConnection(
+            id=r["id"],
+            hero_id=r["hero_id"],
+            hero_name=r["hero_name"],
+            requester_hero_id=r["requester_hero_id"],
+            requester_hero_name=r["requester_hero_name"],
+            requested_at=r["requested_at"],
+        )
+        for r in records
+    ]
+
+
+@router.post("/connections/{connection_id}/approve")
+async def approve_connection(
+    connection_id: str,
+    guardian: Annotated[dict[str, str], Depends(get_current_guardian)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, str]:
+    """Approve a pending connection for a child."""
+    query = """
+    MATCH (hero:Hero)-[:SPONSORED_BY]->(s:SponsorNode {id: $sponsor_id})
+    MATCH (hero)<-[c:CONNECTED_TO {id: $connection_id}]-(requester:Hero)
+    SET c.status = 'active',
+        c.approved_by_guardian = true,
+        c.approved_at = datetime()
+    RETURN c
+    """
+    result = await session.run(query, sponsor_id=guardian["id"], connection_id=connection_id)
+    record = await result.single()
+    if not record:
+        raise ValueError("Connection not found or not authorized")
+    return {"message": "Connection approved"}
+
+
+@router.post("/connections/{connection_id}/decline")
+async def decline_connection(
+    connection_id: str,
+    guardian: Annotated[dict[str, str], Depends(get_current_guardian)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, str]:
+    """Decline a pending connection for a child."""
+    query = """
+    MATCH (hero:Hero)-[:SPONSORED_BY]->(s:SponsorNode {id: $sponsor_id})
+    MATCH (hero)<-[c:CONNECTED_TO {id: $connection_id}]-(requester:Hero)
+    SET c.status = 'declined',
+        c.declined_at = datetime()
+    RETURN c
+    """
+    result = await session.run(query, sponsor_id=guardian["id"], connection_id=connection_id)
+    record = await result.single()
+    if not record:
+        raise ValueError("Connection not found or not authorized")
+    return {"message": "Connection declined"}
+
+
+@router.put("/children/{child_id}/settings")
+async def put_child_settings(
+    child_id: str,
+    settings_update: ContentSettingsUpdate,
+    guardian: Annotated[dict[str, str], Depends(get_current_guardian)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, str]:
+    """Update content settings for a child (PUT version for frontend compatibility)."""
+    return await update_child_settings(child_id, settings_update, guardian, session)
+
+
 @router.get("/export-data")
 async def export_child_data(
     child_id: str,

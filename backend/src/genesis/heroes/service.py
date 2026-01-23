@@ -8,12 +8,17 @@ from genesis.heroes.schemas import (
     ContentSettings,
     EpisodeSummary,
     HeroCreate,
+    HeroEpisode,
     HeroResponse,
     HeroStatus,
     HeroSummary,
     HeroUpdate,
     HeroWithEpisodes,
+    Panel,
+    PanelDialogue,
     PowerType,
+    Script,
+    VideoInfo,
 )
 
 
@@ -132,6 +137,108 @@ class HeroService:
             )
             for h in heroes
         ]
+
+    async def get_hero_episodes(
+        self,
+        hero_id: str,
+        limit: int = 10,
+    ) -> list[HeroEpisode]:
+        """Get all episodes for a hero."""
+        episodes = await self.repo.get_hero_episodes(hero_id, limit)
+        return [self._to_hero_episode(e) for e in episodes]
+
+    async def get_hero_latest_episode(self, hero_id: str) -> HeroEpisode:
+        """Get the latest episode for a hero."""
+        episode = await self.repo.get_hero_latest_episode(hero_id)
+        if not episode:
+            raise NotFoundError("No episodes found for this hero")
+        return self._to_hero_episode(episode)
+
+    async def get_hero_episode(
+        self,
+        hero_id: str,
+        episode_number: int,
+    ) -> HeroEpisode:
+        """Get a specific episode by number."""
+        episode = await self.repo.get_hero_episode(hero_id, episode_number)
+        if not episode:
+            raise NotFoundError(f"Episode {episode_number} not found")
+        return self._to_hero_episode(episode)
+
+    def _to_hero_episode(self, episode: dict) -> HeroEpisode:  # type: ignore[type-arg]
+        """Convert Neo4j episode result to HeroEpisode."""
+        # Parse panels
+        raw_panels = episode.get("panels", [])
+        panels = []
+        for p in raw_panels:
+            dialogue = [
+                PanelDialogue(character=d.get("character", ""), text=d.get("text", ""))
+                for d in p.get("dialogue", [])
+            ]
+            panels.append(
+                Panel(
+                    panel_number=p.get("panel_number", 0),
+                    image_url=p.get("image_url"),
+                    generation_prompt=p.get("generation_prompt"),
+                    visual_prompt=p.get("visual_prompt"),
+                    dialogue=dialogue,
+                    caption=p.get("caption"),
+                    action=p.get("action"),
+                    safety_score=p.get("safety_score", 1.0),
+                    retry_count=p.get("retry_count", 0),
+                )
+            )
+
+        # Parse script
+        raw_script = episode.get("script", {})
+        script_panels = []
+        for p in raw_script.get("panels", []):
+            dialogue = [
+                PanelDialogue(character=d.get("character", ""), text=d.get("text", ""))
+                for d in p.get("dialogue", [])
+            ]
+            script_panels.append(
+                Panel(
+                    panel_number=p.get("panel_number", 0),
+                    visual_prompt=p.get("visual_prompt"),
+                    dialogue=dialogue,
+                    caption=p.get("caption"),
+                    action=p.get("action"),
+                )
+            )
+
+        script = Script(
+            title=raw_script.get("title", episode.get("title", "")),
+            synopsis=raw_script.get("synopsis", episode.get("synopsis", "")),
+            panels=script_panels,
+            canon_references=raw_script.get("canon_references", []),
+            tags=raw_script.get("tags", []),
+        )
+
+        # Parse video
+        raw_video = episode.get("video")
+        video = None
+        if raw_video:
+            video = VideoInfo(
+                video_url=raw_video.get("video_url", ""),
+                duration_seconds=raw_video.get("duration_seconds", 0),
+                resolution=raw_video.get("resolution", "1080p"),
+                format=raw_video.get("format", "mp4"),
+                file_size_mb=raw_video.get("file_size_mb", 0),
+            )
+
+        return HeroEpisode(
+            hero_id=episode.get("hero_id", ""),
+            episode_number=episode.get("episode_number", 0),
+            title=episode.get("title", ""),
+            synopsis=episode.get("synopsis", ""),
+            script=script,
+            panels=panels,
+            video=video,
+            tags=episode.get("tags", []),
+            canon_references=episode.get("canon_references", []),
+            generated_at=episode.get("generated_at"),
+        )
 
     def _to_hero_response(self, hero: dict) -> HeroResponse:  # type: ignore[type-arg]
         """Convert Neo4j result to HeroResponse."""

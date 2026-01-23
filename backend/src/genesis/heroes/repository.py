@@ -193,3 +193,61 @@ class HeroRepository:
         result = await self.session.run(query, hero_id=hero_id)
         record = await result.single()
         return record["sponsor_id"] if record else None
+
+    async def get_hero_episodes(
+        self,
+        hero_id: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Get all episodes for a hero with full details."""
+        query = """
+        MATCH (hero:Hero {id: $hero_id})-[:HAS_EPISODE]->(e:Episode)
+        RETURN e {
+            .hero_id, .episode_number, .title, .synopsis,
+            .script, .panels, .video, .tags, .canon_references,
+            .generated_at
+        } as episode
+        ORDER BY e.episode_number DESC
+        LIMIT $limit
+        """
+        result = await self.session.run(query, hero_id=hero_id, limit=limit)
+        records = await result.fetch(limit)
+        return [dict(r["episode"]) for r in records]
+
+    async def get_hero_latest_episode(self, hero_id: str) -> dict[str, Any] | None:
+        """Get the latest episode for a hero."""
+        query = """
+        MATCH (hero:Hero {id: $hero_id})-[:HAS_EPISODE]->(e:Episode)
+        RETURN e {
+            .hero_id, .episode_number, .title, .synopsis,
+            .script, .panels, .video, .tags, .canon_references,
+            .generated_at
+        } as episode
+        ORDER BY e.episode_number DESC
+        LIMIT 1
+        """
+        result = await self.session.run(query, hero_id=hero_id)
+        record = await result.single()
+        return dict(record["episode"]) if record else None
+
+    async def get_hero_episode(
+        self,
+        hero_id: str,
+        episode_number: int,
+    ) -> dict[str, Any] | None:
+        """Get a specific episode by number."""
+        query = """
+        MATCH (hero:Hero {id: $hero_id})-[:HAS_EPISODE]->(e:Episode {episode_number: $episode_number})
+        RETURN e {
+            .hero_id, .episode_number, .title, .synopsis,
+            .script, .panels, .video, .tags, .canon_references,
+            .generated_at
+        } as episode
+        """
+        result = await self.session.run(
+            query,
+            hero_id=hero_id,
+            episode_number=episode_number,
+        )
+        record = await result.single()
+        return dict(record["episode"]) if record else None

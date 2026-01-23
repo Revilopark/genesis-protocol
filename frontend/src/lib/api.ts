@@ -167,39 +167,39 @@ export interface HeroWithEpisodes {
 export const api = {
   // Guardian endpoints
   getChildren: (): Promise<Child[]> =>
-    fetchWithAuth("/api/guardian/children"),
+    fetchWithAuth("/api/v1/guardian/children"),
 
   getPendingApprovals: (): Promise<ConnectionRequest[]> =>
-    fetchWithAuth("/api/guardian/pending-approvals"),
+    fetchWithAuth("/api/v1/guardian/pending-approvals"),
 
   approveConnection: (connectionId: string): Promise<void> =>
-    fetchWithAuth(`/api/guardian/connections/${connectionId}/approve`, {
+    fetchWithAuth(`/api/v1/guardian/connections/${connectionId}/approve`, {
       method: "POST",
     }),
 
   declineConnection: (connectionId: string): Promise<void> =>
-    fetchWithAuth(`/api/guardian/connections/${connectionId}/decline`, {
+    fetchWithAuth(`/api/v1/guardian/connections/${connectionId}/decline`, {
       method: "POST",
     }),
 
   getChildEpisodes: (childId: string): Promise<Episode[]> =>
-    fetchWithAuth(`/api/guardian/children/${childId}/episodes`),
+    fetchWithAuth(`/api/v1/guardian/children/${childId}/episodes`),
 
   updateChildSettings: (childId: string, settings: ContentSettingsPayload): Promise<void> =>
-    fetchWithAuth(`/api/guardian/children/${childId}/settings`, {
+    fetchWithAuth(`/api/v1/guardian/children/${childId}/settings`, {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
 
   // Auth endpoints
   login: (email: string, password: string): Promise<{ access_token: string }> =>
-    fetchWithAuth("/api/auth/login", {
+    fetchWithAuth("/api/v1/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     }),
 
   verifyIdentity: (idmeToken: string): Promise<void> =>
-    fetchWithAuth("/api/auth/verify-identity", {
+    fetchWithAuth("/api/v1/auth/verify-identity", {
       method: "POST",
       body: JSON.stringify({ token: idmeToken }),
     }),
