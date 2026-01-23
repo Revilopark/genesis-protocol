@@ -89,8 +89,8 @@ async def activate_hero(
 ) -> HeroResponse:
     """Activate a Hero (guardian-only endpoint)."""
     service = HeroService(session)
-    # TODO: Verify guardian owns this hero's sponsor
-    return await service.activate_hero(hero_id)
+    # Guardian ID is their sponsor_id in the system
+    return await service.activate_hero(hero_id, sponsor_id=guardian["id"])
 
 
 @router.get("/guardian/children", response_model=list[HeroSummary])
@@ -100,5 +100,5 @@ async def get_guardian_children(
 ) -> list[HeroSummary]:
     """Get all heroes sponsored by the current guardian."""
     service = HeroService(session)
-    # TODO: Get sponsor_id from guardian's profile
+    # Guardian's ID is their sponsor_id in the system
     return await service.get_guardian_children(guardian["id"])

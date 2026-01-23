@@ -1,5 +1,6 @@
 """Authentication service."""
 
+import logging
 from datetime import timedelta
 from urllib.parse import urlencode
 
@@ -9,6 +10,8 @@ from genesis.auth.schemas import TokenResponse, UserType
 from genesis.config import settings
 from genesis.core.exceptions import AuthenticationError
 from genesis.core.security import create_access_token, create_refresh_token, decode_access_token
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -167,10 +170,99 @@ class AuthService:
         except Exception as e:
             raise AuthenticationError(f"Failed to refresh token: {e}") from e
 
-    async def logout(self, user_id: str) -> None:
-        """Logout user (could add token blacklisting here)."""
-        # In production, you might want to:
-        # 1. Add token to a blacklist in Redis
-        # 2. Revoke refresh tokens
-        # 3. Clear session data
-        pass
+    async def logout(self, user_id: str, access_token: str | None = None) -> None:
+        """Logout user by blacklisting their tokens.
+
+        Args:
+            user_id: The user's ID
+            access_token: Optional access token to blacklist
+        """
+        try:
+            from genesis.core.redis import get_redis, _redis_available
+
+            if not _redis_available:
+                logger.warning("Redis unavailable, logout without token blacklisting")
+                return
+
+            redis_client = get_redis()
+
+            # Blacklist the current access token if provided
+            if access_token:
+                try:
+                    payload = decode_access_token(access_token)
+                    # Get token expiration time
+                    exp = payload.get("exp", 0)
+                    # Calculate TTL (time until token expires)
+                    import time
+                    ttl = max(0, int(exp - time.time()))
+
+                    if ttl > 0:
+                        # Add token to blacklist with TTL matching expiration
+                        await redis_client.setex(
+                            f"blacklist:token:{access_token[:32]}",  # Use prefix of token as key
+                            ttl,
+                            "1",
+                        )
+                        logger.info(f"Access token blacklisted for user {user_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to decode token for blacklisting: {e}")
+
+            # Increment user's token version to invalidate all existing refresh tokens
+            await redis_client.incr(f"user:token_version:{user_id}")
+
+            # Clear any cached user data
+            await redis_client.delete(f"user:session:{user_id}")
+
+            logger.info(f"User {user_id} logged out successfully")
+
+        except Exception as e:
+            logger.error(f"Error during logout for user {user_id}: {e}")
+            # Don't raise - logout should be best-effort
+
+    async def is_token_blacklisted(self, token: str) -> bool:
+        """Check if a token is blacklisted.
+
+        Args:
+            token: The access token to check
+
+        Returns:
+            True if blacklisted, False otherwise
+        """
+        try:
+            from genesis.core.redis import get_redis, _redis_available
+
+            if not _redis_available:
+                return False
+
+            redis_client = get_redis()
+            result = await redis_client.exists(f"blacklist:token:{token[:32]}")
+            return bool(result)
+
+        except Exception as e:
+            logger.warning(f"Failed to check token blacklist: {e}")
+            return False
+
+    async def get_user_token_version(self, user_id: str) -> int:
+        """Get the current token version for a user.
+
+        Used to invalidate all tokens when user logs out everywhere.
+
+        Args:
+            user_id: The user's ID
+
+        Returns:
+            Current token version (0 if not set)
+        """
+        try:
+            from genesis.core.redis import get_redis, _redis_available
+
+            if not _redis_available:
+                return 0
+
+            redis_client = get_redis()
+            version = await redis_client.get(f"user:token_version:{user_id}")
+            return int(version) if version else 0
+
+        except Exception as e:
+            logger.warning(f"Failed to get token version: {e}")
+            return 0

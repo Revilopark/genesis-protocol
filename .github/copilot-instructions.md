@@ -1,0 +1,24 @@
+# Copilot Instructions
+- Scope: multi-service repo with FastAPI backend, Next.js frontend, K8s/Terraform infra; focus on concrete patterns already present.
+- Architecture: modular monolith backend with routers under backend/src/genesis/*, Neo4j AuraDB as primary store, Redis for cache/pubsub, AI “rooms” (writers/art/studio) orchestrated via jobs; frontend is Guardian dashboard for parents.
+- App entry: FastAPI factory + lifespan in [backend/src/genesis/main.py](backend/src/genesis/main.py) initializes Neo4j/Redis, wires routers with /api/v1 prefixes, exposes /health, /ready, /debug/connections for readiness/debug.
+- Config: environment-driven via Pydantic settings in [backend/src/genesis/config.py](backend/src/genesis/config.py); reads .env, supports neo4j_*, redis_url, jwt_*, clever/idme oauth, gemini_api_key, gcp_project_id, s3 bucket, cors_origins, rate_limit_requests_per_minute.
+- Data access: Neo4j async driver setup in [backend/src/genesis/core/database.py](backend/src/genesis/core/database.py); use FastAPI dependencies get_db/get_session for AsyncSession. Redis client/dependency in [backend/src/genesis/core/redis.py](backend/src/genesis/core/redis.py).
+- Security: JWT helpers in [backend/src/genesis/core/security.py](backend/src/genesis/core/security.py); custom HTTP factories in [backend/src/genesis/core/exceptions.py](backend/src/genesis/core/exceptions.py). Auth dependencies in [backend/src/genesis/auth/dependencies.py](backend/src/genesis/auth/dependencies.py) enforce roles (student/guardian/admin) and expect Authorization: Bearer <token>.
+- Auth flows: OAuth endpoints for Clever/ID.me and token refresh/logout in [backend/src/genesis/auth/router.py](backend/src/genesis/auth/router.py); AuthService is instantiated per-request via dependency get_auth_service.
+- Routing pattern: routers live per domain (heroes, social, canon, content, guardian, moderation, jobs). Example hero endpoints in [backend/src/genesis/heroes/router.py](backend/src/genesis/heroes/router.py) show dependency injection (current_user, get_db) and service layer (HeroService) for Neo4j access.
+- Middleware/logging: [backend/src/genesis/core/middleware.py](backend/src/genesis/core/middleware.py) adds RequestLoggingMiddleware using structlog and request-scoped UUID; CORS is open by default via settings.cors_origins.
+- Debug caution: docs/redoc routes only enabled when settings.debug is true; avoid relying on Swagger in production.
+- Backend dev workflow: from backend/, run `uv sync` then `uv run uvicorn genesis.main:app --reload`; dependencies include uv (package manager). Start dependencies with `docker-compose up -d` from repo root.
+- Backend QA: `uv run pytest tests/ -v` from backend/; lint `uv run ruff check src/`; typecheck `uv run mypy src/genesis`.
+- Frontend stack: Next.js App Router with Tailwind; root layout + providers in [frontend/src/app/layout.tsx](frontend/src/app/layout.tsx), landing in [frontend/src/app/page.tsx](frontend/src/app/page.tsx), dashboard in [frontend/src/app/dashboard/page.tsx](frontend/src/app/dashboard/page.tsx).
+- Frontend data fetching: shared helper in [frontend/src/lib/api.ts](frontend/src/lib/api.ts) wraps fetchWithAuth, injects Authorization from localStorage access_token, and redirects to / on 401; base URL from NEXT_PUBLIC_API_URL (defaults http://localhost:8000).
+- Frontend queries: dashboard uses TanStack Query to call api.getChildren/pending approvals; guardian routes expect backend /api/guardian/* endpoints.
+- Run frontend: from frontend/, `npm install` then `npm run dev`; tests via `npm run test`.
+- API shape references in frontend types (Child, HeroProfile, HeroEpisode, etc.) located in [frontend/src/lib/api.ts](frontend/src/lib/api.ts); align backend payloads to these when changing schemas.
+- Observability: request logging already includes X-Request-ID on responses; preserve header when proxying.
+- Deployment note: CI builds images -> K8s manifests under infra/kubernetes; ArgoCD syncs overlays (see repo README).
+- When adding endpoints: use /api/v1 prefix, apply role dependencies (get_current_guardian/student/admin) and return Pydantic schemas; use exception factories for consistent HTTP errors.
+- When adding data access: prefer passing AsyncSession from get_db and service classes per request; ensure Neo4j connectivity is optional-friendly (init logs warning, but app still serves /health).
+- Content pipeline modules (content, jobs, rooms) exist; keep AI calls behind service layers and guard with rate limit if expanding.
+- Frontend auth expectation: access_token stored client-side; no refresh logic in UI yet—maintain compatibility or extend api.ts if adding refresh.

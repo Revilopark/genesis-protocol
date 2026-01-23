@@ -255,4 +255,76 @@ export const api = {
     fetchWithAuth(`/api/v1/social/requests/${connectionId}/reject`, {
       method: "POST",
     }),
+
+  // Content endpoints
+  getEpisodes: (limit: number = 10, offset: number = 0): Promise<Episode[]> =>
+    fetchWithAuth(`/api/v1/content/episodes?limit=${limit}&offset=${offset}`),
+
+  getEpisode: (episodeId: string): Promise<EpisodeDetail> =>
+    fetchWithAuth(`/api/v1/content/episodes/${episodeId}`),
+
+  rateEpisode: (episodeId: string, rating: number): Promise<void> =>
+    fetchWithAuth(`/api/v1/content/episodes/${episodeId}/rate?rating=${rating}`, {
+      method: "POST",
+    }),
+
+  requestEpisodeGeneration: (includeCrossover: boolean = false, crossoverHeroId?: string): Promise<Episode> =>
+    fetchWithAuth("/api/v1/content/episodes/generate", {
+      method: "POST",
+      body: JSON.stringify({
+        include_crossover: includeCrossover,
+        crossover_hero_id: crossoverHeroId,
+      }),
+    }),
+
+  // Crossover endpoints
+  requestCrossover: (targetHeroId: string, message?: string): Promise<void> =>
+    fetchWithAuth("/api/v1/social/crossover/request", {
+      method: "POST",
+      body: JSON.stringify({ target_hero_id: targetHeroId, message }),
+    }),
+
+  getPendingCrossovers: (): Promise<CrossoverRequest[]> =>
+    fetchWithAuth("/api/v1/social/crossover/pending"),
+
+  acceptCrossover: (crossoverId: string): Promise<void> =>
+    fetchWithAuth(`/api/v1/social/crossover/${crossoverId}/accept`, {
+      method: "POST",
+    }),
+
+  declineCrossover: (crossoverId: string): Promise<void> =>
+    fetchWithAuth(`/api/v1/social/crossover/${crossoverId}/decline`, {
+      method: "POST",
+    }),
 };
+
+export interface EpisodeDetail {
+  id: string;
+  hero_id: string;
+  episode_number: number;
+  title: string;
+  synopsis: string;
+  comic_url: string | null;
+  video_url: string | null;
+  tier: string;
+  generation_status: string;
+  moderation_status: string;
+  generated_at: string | null;
+  published_at: string | null;
+  is_crossover?: boolean;
+  crossover_partner_name?: string;
+  panels?: Panel[];
+  script?: Script;
+}
+
+export interface CrossoverRequest {
+  id: string;
+  requester_hero_id: string;
+  requester_hero_name: string;
+  target_hero_id: string;
+  target_hero_name: string;
+  status: string;
+  message: string | null;
+  created_at: string;
+  episode_id: string | null;
+}

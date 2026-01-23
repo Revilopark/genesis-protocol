@@ -96,8 +96,17 @@ class HeroService:
             raise NotFoundError("Hero not found")
         return self._to_hero_response(updated)
 
-    async def activate_hero(self, hero_id: str) -> HeroResponse:
+    async def activate_hero(
+        self,
+        hero_id: str,
+        sponsor_id: str,
+    ) -> HeroResponse:
         """Activate a Hero after guardian approval."""
+        # Verify guardian owns this hero
+        is_owner = await self.repo.verify_guardian_ownership(hero_id, sponsor_id)
+        if not is_owner:
+            raise ValidationError("Not authorized to activate this hero")
+
         success = await self.repo.update_status(hero_id, HeroStatus.ACTIVE)
         if not success:
             raise NotFoundError("Hero not found")

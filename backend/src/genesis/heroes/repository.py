@@ -169,3 +169,27 @@ class HeroRepository:
         SET hero.last_active_at = datetime()
         """
         await self.session.run(query, hero_id=hero_id)
+
+    async def verify_guardian_ownership(
+        self,
+        hero_id: str,
+        sponsor_id: str,
+    ) -> bool:
+        """Verify that a guardian owns this hero's sponsor relationship."""
+        query = """
+        MATCH (hero:Hero {id: $hero_id})-[:SPONSORED_BY]->(sponsor:SponsorNode {id: $sponsor_id})
+        RETURN hero
+        """
+        result = await self.session.run(query, hero_id=hero_id, sponsor_id=sponsor_id)
+        record = await result.single()
+        return record is not None
+
+    async def get_sponsor_id_for_hero(self, hero_id: str) -> str | None:
+        """Get the sponsor ID for a hero."""
+        query = """
+        MATCH (hero:Hero {id: $hero_id})-[:SPONSORED_BY]->(sponsor:SponsorNode)
+        RETURN sponsor.id as sponsor_id
+        """
+        result = await self.session.run(query, hero_id=hero_id)
+        record = await result.single()
+        return record["sponsor_id"] if record else None
